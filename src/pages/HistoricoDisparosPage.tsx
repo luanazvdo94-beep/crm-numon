@@ -17,6 +17,9 @@ type DispatchLogRecord = {
 type CampaignClassification = 'boa' | 'media' | 'ruim';
 type CampaignAction = 'escalar' | 'ajustar' | 'pausar';
 
+type TemplateClassification = 'bom' | 'medio' | 'ruim';
+type TemplateAction = 'usar' | 'testar' | 'evitar';
+
 type CampaignStat = {
   campaign: string;
   total: number;
@@ -26,6 +29,17 @@ type CampaignStat = {
   errorRate: number;
   classification: CampaignClassification;
   action: CampaignAction;
+};
+
+type TemplateStat = {
+  template: string;
+  total: number;
+  enviados: number;
+  erros: number;
+  successRate: number;
+  errorRate: number;
+  classification: TemplateClassification;
+  action: TemplateAction;
 };
 
 function classifyCampaign(successRate: number): CampaignClassification {
@@ -38,6 +52,18 @@ function getCampaignAction(successRate: number): CampaignAction {
   if (successRate >= 80) return 'escalar';
   if (successRate >= 50) return 'ajustar';
   return 'pausar';
+}
+
+function classifyTemplate(successRate: number): TemplateClassification {
+  if (successRate >= 80) return 'bom';
+  if (successRate >= 50) return 'medio';
+  return 'ruim';
+}
+
+function getTemplateAction(successRate: number): TemplateAction {
+  if (successRate >= 80) return 'usar';
+  if (successRate >= 50) return 'testar';
+  return 'evitar';
 }
 
 function getClassificationLabel(classification: CampaignClassification) {
@@ -56,6 +82,24 @@ function getActionDescription(action: CampaignAction) {
   if (action === 'escalar') return 'Campanha com boa performance. Pode receber mais base.';
   if (action === 'ajustar') return 'Campanha intermediária. Ajustar mensagem, público ou template.';
   return 'Campanha fraca. Pausar antes de continuar disparando.';
+}
+
+function getTemplateClassificationLabel(classification: TemplateClassification) {
+  if (classification === 'bom') return 'Bom';
+  if (classification === 'medio') return 'Médio';
+  return 'Ruim';
+}
+
+function getTemplateActionLabel(action: TemplateAction) {
+  if (action === 'usar') return 'USAR';
+  if (action === 'testar') return 'TESTAR';
+  return 'EVITAR';
+}
+
+function getTemplateActionDescription(action: TemplateAction) {
+  if (action === 'usar') return 'Template com boa performance. Priorizar nos próximos disparos.';
+  if (action === 'testar') return 'Template intermediário. Pode ser usado, mas deve ser comparado com outras mensagens.';
+  return 'Template fraco. Evitar ou reescrever antes de continuar usando.';
 }
 
 function getClassificationBadgeStyle(classification: CampaignClassification): CSSProperties {
@@ -92,6 +136,54 @@ function getActionBadgeStyle(action: CampaignAction): CSSProperties {
   }
 
   if (action === 'ajustar') {
+    return {
+      background: '#fef9c3',
+      color: '#854d0e',
+      border: '1px solid #fde68a',
+    };
+  }
+
+  return {
+    background: '#fee2e2',
+    color: '#991b1b',
+    border: '1px solid #fecaca',
+  };
+}
+
+function getTemplateClassificationBadgeStyle(classification: TemplateClassification): CSSProperties {
+  if (classification === 'bom') {
+    return {
+      background: '#dcfce7',
+      color: '#166534',
+      border: '1px solid #86efac',
+    };
+  }
+
+  if (classification === 'medio') {
+    return {
+      background: '#fef9c3',
+      color: '#854d0e',
+      border: '1px solid #fde68a',
+    };
+  }
+
+  return {
+    background: '#fee2e2',
+    color: '#991b1b',
+    border: '1px solid #fecaca',
+  };
+}
+
+function getTemplateActionBadgeStyle(action: TemplateAction): CSSProperties {
+  if (action === 'usar') {
+    return {
+      background: '#dcfce7',
+      color: '#166534',
+      border: '1px solid #86efac',
+    };
+  }
+
+  if (action === 'testar') {
     return {
       background: '#fef9c3',
       color: '#854d0e',
@@ -205,7 +297,8 @@ export default function HistoricoDisparosPage() {
         !term ||
         normalizeText(item.nome || '').includes(term) ||
         normalizeText(item.telefone || '').includes(term) ||
-        normalizeText(item.campaign_name || '').includes(term);
+        normalizeText(item.campaign_name || '').includes(term) ||
+        normalizeText(item.template_key || '').includes(term);
 
       const matchesStatus = statusFilter === 'todos' || item.status === statusFilter;
 
@@ -259,6 +352,48 @@ export default function HistoricoDisparosPage() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [filteredLogs]);
 
+  const templateStats = useMemo<TemplateStat[]>(() => {
+    const map = new Map<string, TemplateStat>();
+
+    filteredLogs.forEach((item) => {
+      const template = item.template_key || 'sem_template';
+
+      if (!map.has(template)) {
+        map.set(template, {
+          template,
+          total: 0,
+          enviados: 0,
+          erros: 0,
+          successRate: 0,
+          errorRate: 0,
+          classification: 'medio',
+          action: 'testar',
+        });
+      }
+
+      const current = map.get(template)!;
+
+      current.total += 1;
+
+      if (item.status === 'enviado') current.enviados += 1;
+      if (item.status === 'erro') current.erros += 1;
+
+      current.successRate =
+        current.total > 0 ? Math.round((current.enviados / current.total) * 100) : 0;
+
+      current.errorRate =
+        current.total > 0 ? Math.round((current.erros / current.total) * 100) : 0;
+
+      current.classification = classifyTemplate(current.successRate);
+      current.action = getTemplateAction(current.successRate);
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      if (b.successRate !== a.successRate) return b.successRate - a.successRate;
+      return b.total - a.total;
+    });
+  }, [filteredLogs]);
+
   const rankedBySuccess = useMemo(() => {
     return [...campaignStats].sort((a, b) => {
       if (b.successRate !== a.successRate) return b.successRate - a.successRate;
@@ -277,9 +412,31 @@ export default function HistoricoDisparosPage() {
     });
   }, [campaignStats]);
 
+  const rankedTemplatesBySuccess = useMemo(() => {
+    return [...templateStats].sort((a, b) => {
+      if (b.successRate !== a.successRate) return b.successRate - a.successRate;
+      return b.total - a.total;
+    });
+  }, [templateStats]);
+
+  const rankedTemplatesByVolume = useMemo(() => {
+    return [...templateStats].sort((a, b) => b.total - a.total);
+  }, [templateStats]);
+
+  const rankedTemplatesByError = useMemo(() => {
+    return [...templateStats].sort((a, b) => {
+      if (b.errorRate !== a.errorRate) return b.errorRate - a.errorRate;
+      return b.erros - a.erros;
+    });
+  }, [templateStats]);
+
   const bestCampaign = rankedBySuccess[0] || null;
   const biggestCampaign = rankedByVolume[0] || null;
   const worstCampaign = rankedByError[0] || null;
+
+  const bestTemplate = rankedTemplatesBySuccess[0] || null;
+  const mostUsedTemplate = rankedTemplatesByVolume[0] || null;
+  const worstTemplate = rankedTemplatesByError[0] || null;
 
   const totalEnviados = filteredLogs.filter((item) => item.status === 'enviado').length;
   const totalErros = filteredLogs.filter((item) => item.status === 'erro').length;
@@ -290,6 +447,10 @@ export default function HistoricoDisparosPage() {
   const totalEscalar = campaignStats.filter((item) => item.action === 'escalar').length;
   const totalAjustar = campaignStats.filter((item) => item.action === 'ajustar').length;
   const totalPausar = campaignStats.filter((item) => item.action === 'pausar').length;
+
+  const totalTemplatesUsar = templateStats.filter((item) => item.action === 'usar').length;
+  const totalTemplatesTestar = templateStats.filter((item) => item.action === 'testar').length;
+  const totalTemplatesEvitar = templateStats.filter((item) => item.action === 'evitar').length;
 
   function exportCsv() {
     if (!filteredLogs.length) return;
@@ -372,6 +533,56 @@ export default function HistoricoDisparosPage() {
                 }}
               >
                 IA: {getActionLabel(item.action)}
+              </span>
+            </div>
+
+            <strong
+              style={{
+                ...styles.rankValue,
+                color:
+                  type === 'error'
+                    ? '#991B1B'
+                    : type === 'success'
+                    ? '#166534'
+                    : '#123C73',
+              }}
+            >
+              {type === 'volume'
+                ? item.total
+                : type === 'error'
+                ? `${item.errorRate}%`
+                : `${item.successRate}%`}
+            </strong>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderTemplateRankList(items: TemplateStat[], type: 'success' | 'volume' | 'error') {
+    if (items.length === 0) {
+      return <div style={styles.emptyMini}>Sem templates no filtro atual.</div>;
+    }
+
+    return (
+      <div style={styles.rankList}>
+        {items.slice(0, 5).map((item, index) => (
+          <div key={`${type}-${item.template}`} style={styles.rankRow}>
+            <span style={styles.rankPosition}>{index + 1}</span>
+
+            <div style={styles.rankInfo}>
+              <strong style={styles.rankCampaign}>{item.template}</strong>
+              <span style={styles.rankMeta}>
+                Total: {item.total} · Enviados: {item.enviados} · Erros: {item.erros}
+              </span>
+              <span
+                style={{
+                  ...styles.actionInlineBadge,
+                  ...getTemplateActionBadgeStyle(item.action),
+                }}
+                title={getTemplateActionDescription(item.action)}
+              >
+                IA: {getTemplateActionLabel(item.action)}
               </span>
             </div>
 
@@ -485,7 +696,7 @@ export default function HistoricoDisparosPage() {
 
       <div style={styles.filtersCard}>
         <input
-          placeholder="Buscar por nome, telefone ou campanha"
+          placeholder="Buscar por nome, telefone, campanha ou template"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={styles.input}
@@ -645,6 +856,83 @@ export default function HistoricoDisparosPage() {
         </div>
       </div>
 
+      <h2 style={styles.sectionTitle}>Ranking de templates</h2>
+
+      <div style={styles.templateDecisionGrid}>
+        <div style={styles.templateDecisionCard}>
+          <span style={styles.aiDecisionLabel}>IA recomenda usar</span>
+          <strong style={styles.aiDecisionValue}>{totalTemplatesUsar}</strong>
+          <span style={styles.aiDecisionHint}>Templates bons, com taxa de sucesso a partir de 80%.</span>
+        </div>
+
+        <div style={styles.templateDecisionCard}>
+          <span style={styles.aiDecisionLabelAdjust}>IA recomenda testar</span>
+          <strong style={styles.aiDecisionValue}>{totalTemplatesTestar}</strong>
+          <span style={styles.aiDecisionHint}>Templates médios, entre 50% e 79% de sucesso.</span>
+        </div>
+
+        <div style={styles.templateDecisionCardDanger}>
+          <span style={styles.aiDecisionLabelDanger}>IA recomenda evitar</span>
+          <strong style={styles.aiDecisionValueDanger}>{totalTemplatesEvitar}</strong>
+          <span style={styles.aiDecisionHintDanger}>Templates ruins, abaixo de 50% de sucesso.</span>
+        </div>
+      </div>
+
+      <div style={styles.rankingHighlights}>
+        <div style={styles.rankingHighlightCard}>
+          <span style={styles.rankingLabel}>Melhor template</span>
+          <strong style={styles.rankingMain}>
+            {bestTemplate ? bestTemplate.template : '-'}
+          </strong>
+          <span style={styles.rankingSub}>
+            {bestTemplate
+              ? `${bestTemplate.successRate}% de sucesso · ${bestTemplate.total} registros · IA: ${getTemplateActionLabel(bestTemplate.action)}`
+              : 'Sem dados'}
+          </span>
+        </div>
+
+        <div style={styles.rankingHighlightCard}>
+          <span style={styles.rankingLabel}>Template mais usado</span>
+          <strong style={styles.rankingMain}>
+            {mostUsedTemplate ? mostUsedTemplate.template : '-'}
+          </strong>
+          <span style={styles.rankingSub}>
+            {mostUsedTemplate
+              ? `${mostUsedTemplate.total} registros · ${mostUsedTemplate.enviados} enviados · IA: ${getTemplateActionLabel(mostUsedTemplate.action)}`
+              : 'Sem dados'}
+          </span>
+        </div>
+
+        <div style={styles.rankingHighlightCardDanger}>
+          <span style={styles.rankingLabelDanger}>Template com mais erro</span>
+          <strong style={styles.rankingMainDanger}>
+            {worstTemplate ? worstTemplate.template : '-'}
+          </strong>
+          <span style={styles.rankingSubDanger}>
+            {worstTemplate
+              ? `${worstTemplate.errorRate}% de erro · ${worstTemplate.erros} erros · IA: ${getTemplateActionLabel(worstTemplate.action)}`
+              : 'Sem dados'}
+          </span>
+        </div>
+      </div>
+
+      <div style={styles.rankingGrid}>
+        <div style={styles.rankingCard}>
+          <h3 style={styles.rankingTitle}>Top templates por sucesso</h3>
+          {renderTemplateRankList(rankedTemplatesBySuccess, 'success')}
+        </div>
+
+        <div style={styles.rankingCard}>
+          <h3 style={styles.rankingTitle}>Top templates por volume</h3>
+          {renderTemplateRankList(rankedTemplatesByVolume, 'volume')}
+        </div>
+
+        <div style={styles.rankingCard}>
+          <h3 style={styles.rankingTitle}>Templates com mais erro</h3>
+          {renderTemplateRankList(rankedTemplatesByError, 'error')}
+        </div>
+      </div>
+
       <h2 style={styles.sectionTitle}>Desempenho por campanha</h2>
 
       <div style={styles.campaignGrid}>
@@ -690,6 +978,58 @@ export default function HistoricoDisparosPage() {
                 <strong style={styles.aiRecommendationTitle}>Decisão da IA</strong>
                 <span style={styles.aiRecommendationText}>
                   {getActionDescription(campaign.action)}
+                </span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <h2 style={styles.sectionTitle}>Desempenho por template</h2>
+
+      <div style={styles.campaignGrid}>
+        {templateStats.length === 0 ? (
+          <div style={styles.emptyState}>Nenhum template encontrado.</div>
+        ) : (
+          templateStats.map((template) => (
+            <div key={template.template} style={styles.campaignCard}>
+              <div style={styles.campaignHeader}>
+                <strong style={styles.campaignTitle}>{template.template}</strong>
+
+                <div style={styles.badgeGroup}>
+                  <span
+                    style={{
+                      ...styles.classificationBadge,
+                      ...getTemplateClassificationBadgeStyle(template.classification),
+                    }}
+                  >
+                    {getTemplateClassificationLabel(template.classification)}
+                  </span>
+
+                  <span
+                    style={{
+                      ...styles.actionBadge,
+                      ...getTemplateActionBadgeStyle(template.action),
+                    }}
+                    title={getTemplateActionDescription(template.action)}
+                  >
+                    {getTemplateActionLabel(template.action)}
+                  </span>
+                </div>
+              </div>
+
+              <div style={styles.campaignStats}>
+                <span>Total: {template.total}</span>
+                <span>Enviados: {template.enviados}</span>
+                <span>Erros: {template.erros}</span>
+                <span>Sucesso: {template.successRate}%</span>
+                <span>Erro: {template.errorRate}%</span>
+              </div>
+
+              <div style={styles.aiRecommendationBox}>
+                <strong style={styles.aiRecommendationTitle}>Decisão da IA para template</strong>
+                <span style={styles.aiRecommendationText}>
+                  {getTemplateActionDescription(template.action)}
                 </span>
               </div>
             </div>
@@ -836,6 +1176,28 @@ const styles: Record<string, CSSProperties> = {
     boxShadow: '0 8px 24px rgba(15,23,42,.06)',
   },
   aiDecisionCardDanger: {
+    background: '#ffffff',
+    color: '#0f172a',
+    borderRadius: 16,
+    padding: 16,
+    border: '1px solid #fecaca',
+    boxShadow: '0 8px 24px rgba(15,23,42,.06)',
+  },
+  templateDecisionGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: 14,
+    marginBottom: 20,
+  },
+  templateDecisionCard: {
+    background: '#ffffff',
+    color: '#0f172a',
+    borderRadius: 16,
+    padding: 16,
+    border: '1px solid #bbf7d0',
+    boxShadow: '0 8px 24px rgba(15,23,42,.06)',
+  },
+  templateDecisionCardDanger: {
     background: '#ffffff',
     color: '#0f172a',
     borderRadius: 16,
