@@ -66,10 +66,28 @@ export function BaseTable({ leads, search, onSearch, onEdit, onDelete }: BaseTab
                   <td>{new Date(lead.updated_at).toLocaleString('pt-BR')}</td>
                   <td>
                     <div className="row-actions">
-                      <button className="ghost-button small" onClick={() => onEdit(lead)}>
+                      <button
+                        className="small"
+                        onClick={() => onEdit(lead)}
+                        style={{
+                          background: '#FACC15',
+                          color: '#000000',
+                          border: 'none',
+                          fontWeight: 600,
+                        }}
+                      >
                         Editar
                       </button>
-                      <button className="danger-button small" onClick={() => onDelete(lead)}>
+                      <button
+                        className="small"
+                        onClick={() => onDelete(lead)}
+                        style={{
+                          background: '#EF4444',
+                          color: '#000000',
+                          border: 'none',
+                          fontWeight: 600,
+                        }}
+                      >
                         Excluir
                       </button>
                     </div>

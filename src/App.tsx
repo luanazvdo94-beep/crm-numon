@@ -1,8 +1,16 @@
+import IndicacoesTab from "./components/indicacoes/IndicacoesTab";
+import IndicacoesPage from './pages/IndicacoesPage';
+import IndicatorsPage from './pages/IndicatorsPage';
+import TemplatesWhatsAppPage from './pages/TemplatesWhatsAppPage';
+import DisparoMassaPage from './pages/DisparoMassaPage';
+import HistoricoDisparosPage from './pages/HistoricoDisparosPage'; // ✅ NOVO
+
 import { useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { AppHeader } from './components/AppHeader';
 import { AuthScreen } from './components/AuthScreen';
 import { BaseTable } from './components/BaseTable';
+import { CltPreSimulator } from './components/CltPreSimulator';
 import { FunnelView } from './components/FunnelView';
 import { LeadForm } from './components/LeadForm';
 import { TabsBar } from './components/TabsBar';
@@ -183,7 +191,7 @@ export default function App() {
 
         {feedback ? <div className="feedback-banner glass-card">{feedback}</div> : null}
 
-        {activeTab === 'cadastro' ? (
+        {activeTab === 'cadastro' && (
           <LeadForm
             form={form}
             editingId={editingId}
@@ -195,9 +203,9 @@ export default function App() {
               setEditingId(null);
             }}
           />
-        ) : null}
+        )}
 
-        {activeTab === 'base' ? (
+        {activeTab === 'base' && (
           <BaseTable
             leads={filteredLeads}
             search={search}
@@ -205,9 +213,18 @@ export default function App() {
             onEdit={handleEdit}
             onDelete={(lead) => void handleDelete(lead)}
           />
-        ) : null}
+        )}
 
-        {activeTab === 'funil' ? <FunnelView leads={filteredLeads} /> : null}
+        {activeTab === 'funil' && <FunnelView leads={filteredLeads} />}
+        {activeTab === 'pre-simulador-clt' && <CltPreSimulator />}
+        {activeTab === 'indicators' && <IndicatorsPage />}
+        {activeTab === 'indicacoes' && <IndicacoesPage />}
+
+        {activeTab === 'templates-whatsapp' && <TemplatesWhatsAppPage />}
+        {activeTab === 'disparo-massa' && <DisparoMassaPage />}
+
+        {/* ✅ NOVA ABA FUNCIONANDO */}
+        {activeTab === 'historico-disparos' && <HistoricoDisparosPage />}
       </main>
     </div>
   );

@@ -4,6 +4,14 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: 'cadastro', label: 'Cadastro' },
   { key: 'base', label: 'Base' },
   { key: 'funil', label: 'Funil' },
+  { key: 'pre-simulador-clt', label: 'Pré-simulador CLT' },
+  { key: 'indicators', label: 'Indicadores' },
+  { key: 'indicacoes', label: 'Indicações' },
+  { key: 'templates-whatsapp', label: 'Templates WhatsApp' },
+  { key: 'disparo-massa', label: 'Disparo em Massa' },
+
+  // NOVA ABA
+  { key: 'historico-disparos', label: 'Histórico de Disparos' },
 ];
 
 interface TabsBarProps {
