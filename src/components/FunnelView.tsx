@@ -15,6 +15,27 @@ type LeadRecordWithOperationalFields = LeadRecord & {
   followup_recommended?: boolean | null;
   followup_date?: string | null;
   followup_level?: string | null;
+  selected_offer_id?: string | null;
+  selected_offer_summary?: string | null;
+  selected_offer_chosen_at?: string | null;
+};
+
+type LeadOfferStatus = 'draft' | 'sent' | 'chosen' | 'discarded';
+
+type LeadOfferRecord = {
+  id?: string;
+  lead_id?: string;
+  user_id?: string;
+  offer_number: number;
+  bank_name: string;
+  released_amount: string;
+  installment_amount: string;
+  term_months: string;
+  interest_rate: string;
+  description: string;
+  status?: LeadOfferStatus;
+  sent_at?: string | null;
+  chosen_at?: string | null;
 };
 
 interface FunnelViewProps {
@@ -34,6 +55,9 @@ const KANBAN_STAGES = [
 
 const FUNNEL_AUTOMATION_ENDPOINT =
   'https://nodejs-production-15c2.up.railway.app/send-indication-message';
+
+const SEND_LEAD_OFFERS_ENDPOINT =
+  'https://nodejs-production-15c2.up.railway.app/send-lead-offers';
 
 const TEMPLATE_BY_STAGE: Record<string, string> = {
   'Em proposta': 'proposta_clt',
@@ -55,11 +79,38 @@ const CLOSURE_REASONS = [
   'Outro',
 ];
 
+function createEmptyOffer(offerNumber: number): LeadOfferRecord {
+  return {
+    offer_number: offerNumber,
+    bank_name: '',
+    released_amount: '',
+    installment_amount: '',
+    term_months: '',
+    interest_rate: '',
+    description: '',
+    status: 'draft',
+  };
+}
+
+function createEmptyOffers() {
+  return [1, 2, 3, 4, 5].map(createEmptyOffer);
+}
+
 function formatMoney(value: number) {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
   }).format(value);
+}
+
+function formatMoneyOptional(value?: number | string | null) {
+  const numeric = Number(value || 0);
+
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 'R$ 0,00';
+  }
+
+  return formatMoney(numeric);
 }
 
 function normalizeStage(lead: LeadRecord) {
@@ -129,6 +180,41 @@ function canPreSimulateLead(lead: LeadRecord) {
   return extendedLead.clt_ready_for_presimulation === true;
 }
 
+function canManageOffers(lead: LeadRecord) {
+  const stage = normalizeStage(lead);
+  return stage === 'Em proposta';
+}
+
+function getSelectedOfferSummary(lead: LeadRecord) {
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+  return extendedLead.selected_offer_summary || null;
+}
+
+function parseBrazilianDecimal(value: string) {
+  const trimmed = String(value || '').trim();
+
+  if (!trimmed) return null;
+
+  const normalized = trimmed
+    .replace(/[^\d,.-]/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.');
+
+  const numeric = Number(normalized);
+
+  if (!Number.isFinite(numeric)) return null;
+
+  return numeric;
+}
+
+function parseInteger(value: string) {
+  const numeric = Number(String(value || '').replace(/\D/g, ''));
+
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+
+  return numeric;
+}
+
 function getPreSimulationButtonStyle(disabled: boolean): React.CSSProperties {
   return {
     width: '100%',
@@ -140,6 +226,21 @@ function getPreSimulationButtonStyle(disabled: boolean): React.CSSProperties {
     cursor: disabled ? 'not-allowed' : 'pointer',
     fontSize: 12,
     fontWeight: 800,
+    marginTop: 8,
+  };
+}
+
+function getOfferButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    width: '100%',
+    border: '1px solid #bfdbfe',
+    borderRadius: 10,
+    padding: '9px 10px',
+    background: disabled ? '#f1f5f9' : '#eff6ff',
+    color: disabled ? '#94a3b8' : '#1d4ed8',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 12,
+    fontWeight: 900,
     marginTop: 8,
   };
 }
@@ -229,6 +330,12 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
   const [closureNote, setClosureNote] = useState('');
   const [closingId, setClosingId] = useState<string | null>(null);
 
+  const [offerLead, setOfferLead] = useState<LeadRecord | null>(null);
+  const [offerForms, setOfferForms] = useState<LeadOfferRecord[]>(createEmptyOffers);
+  const [offerLoading, setOfferLoading] = useState(false);
+  const [offerSaving, setOfferSaving] = useState(false);
+  const [offerSending, setOfferSending] = useState(false);
+
   useEffect(() => {
     setLocalLeads(leads);
   }, [leads]);
@@ -303,6 +410,212 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
 
     setSelectedLead(null);
     onPreSimulateLead(lead.id);
+  }
+
+  async function openOffersModal(lead: LeadRecord) {
+    setOfferLead(lead);
+    setOfferForms(createEmptyOffers());
+    setFeedback(null);
+    setOfferLoading(true);
+
+    const { data, error } = await supabase
+      .from('lead_offers')
+      .select('*')
+      .eq('lead_id', lead.id)
+      .order('offer_number', { ascending: true });
+
+    if (error) {
+      setFeedback(`Erro ao carregar ofertas: ${error.message}`);
+      setOfferLoading(false);
+      return;
+    }
+
+    const nextOffers = createEmptyOffers();
+
+    (data || []).forEach((offer: any) => {
+      const index = Number(offer.offer_number) - 1;
+
+      if (index >= 0 && index < nextOffers.length) {
+        nextOffers[index] = {
+          id: offer.id,
+          lead_id: offer.lead_id,
+          user_id: offer.user_id,
+          offer_number: Number(offer.offer_number),
+          bank_name: offer.bank_name || '',
+          released_amount:
+            offer.released_amount !== null && offer.released_amount !== undefined
+              ? String(offer.released_amount).replace('.', ',')
+              : '',
+          installment_amount:
+            offer.installment_amount !== null && offer.installment_amount !== undefined
+              ? String(offer.installment_amount).replace('.', ',')
+              : '',
+          term_months:
+            offer.term_months !== null && offer.term_months !== undefined
+              ? String(offer.term_months)
+              : '',
+          interest_rate:
+            offer.interest_rate !== null && offer.interest_rate !== undefined
+              ? String(offer.interest_rate).replace('.', ',')
+              : '',
+          description: offer.description || '',
+          status: offer.status || 'draft',
+          sent_at: offer.sent_at || null,
+          chosen_at: offer.chosen_at || null,
+        };
+      }
+    });
+
+    setOfferForms(nextOffers);
+    setOfferLoading(false);
+  }
+
+  function closeOffersModal() {
+    setOfferLead(null);
+    setOfferForms(createEmptyOffers());
+    setOfferLoading(false);
+    setOfferSaving(false);
+    setOfferSending(false);
+  }
+
+  function updateOfferField(
+    offerIndex: number,
+    field: keyof LeadOfferRecord,
+    value: string,
+  ) {
+    setOfferForms((current) =>
+      current.map((offer, index) =>
+        index === offerIndex
+          ? {
+              ...offer,
+              [field]: value,
+            }
+          : offer,
+      ),
+    );
+  }
+
+  function getValidOffersForSave() {
+    return offerForms.filter((offer) => offer.bank_name.trim().length > 0);
+  }
+
+  async function saveOffers() {
+    if (!offerLead) return false;
+
+    const validOffers = getValidOffersForSave();
+
+    if (validOffers.length === 0) {
+      setFeedback('Cadastre pelo menos uma oferta com o nome do banco.');
+      return false;
+    }
+
+    setOfferSaving(true);
+    setFeedback(null);
+
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData.user?.id;
+
+    if (!userId) {
+      setFeedback('Usuário autenticado não encontrado. Faça login novamente.');
+      setOfferSaving(false);
+      return false;
+    }
+
+    const { error: deleteError } = await supabase
+      .from('lead_offers')
+      .delete()
+      .eq('lead_id', offerLead.id)
+      .in('status', ['draft', 'sent', 'discarded']);
+
+    if (deleteError) {
+      setFeedback(`Erro ao limpar ofertas anteriores: ${deleteError.message}`);
+      setOfferSaving(false);
+      return false;
+    }
+
+    const payload = validOffers.map((offer, index) => ({
+      lead_id: offerLead.id,
+      user_id: userId,
+      offer_number: index + 1,
+      bank_name: offer.bank_name.trim(),
+      released_amount: parseBrazilianDecimal(offer.released_amount),
+      installment_amount: parseBrazilianDecimal(offer.installment_amount),
+      term_months: parseInteger(offer.term_months),
+      interest_rate: parseBrazilianDecimal(offer.interest_rate),
+      description: offer.description.trim() || null,
+      status: 'draft',
+    }));
+
+    const { error: insertError } = await supabase
+      .from('lead_offers')
+      .insert(payload);
+
+    if (insertError) {
+      setFeedback(`Erro ao salvar ofertas: ${insertError.message}`);
+      setOfferSaving(false);
+      return false;
+    }
+
+    setFeedback(`${payload.length} oferta${payload.length === 1 ? '' : 's'} salva${payload.length === 1 ? '' : 's'} com sucesso.`);
+    setOfferSaving(false);
+
+    await openOffersModal(offerLead);
+
+    return true;
+  }
+
+  async function sendOffers() {
+    if (!offerLead) return;
+
+    setOfferSending(true);
+    setFeedback(null);
+
+    const saved = await saveOffers();
+
+    if (!saved) {
+      setOfferSending(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(SEND_LEAD_OFFERS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          leadId: offerLead.id,
+        }),
+      });
+
+      const responseData = await response.json().catch(() => null);
+
+      if (!response.ok || responseData?.success === false) {
+        const message = responseData?.error || `Falha no envio das propostas. HTTP ${response.status}`;
+        setFeedback(message);
+        setOfferSending(false);
+        return;
+      }
+
+      setFeedback(`Propostas enviadas com sucesso para o WhatsApp. Total enviado: ${responseData?.sent || getValidOffersForSave().length}.`);
+
+      setLocalLeads((current) =>
+        current.map((lead) =>
+          lead.id === offerLead.id
+            ? {
+                ...lead,
+                status: 'Em proposta',
+              }
+            : lead,
+        ),
+      );
+
+      closeOffersModal();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro desconhecido ao enviar propostas.';
+      setFeedback(`Erro ao enviar propostas: ${message}`);
+      setOfferSending(false);
+    }
   }
 
   function openClosureModal(lead: LeadRecord) {
@@ -703,6 +1016,8 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                     const previousStage = getPreviousStage(currentStage);
                     const nextStage = getNextStage(currentStage);
                     const canPreSimulate = canPreSimulateLead(lead);
+                    const canOpenOffers = canManageOffers(lead);
+                    const selectedOfferSummary = getSelectedOfferSummary(lead);
 
                     return (
                       <article
@@ -766,6 +1081,25 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                               Pronto para pré-simular
                             </span>
                           ) : null}
+
+                          {selectedOfferSummary ? (
+                            <span
+                              style={{
+                                display: 'block',
+                                marginTop: 8,
+                                borderRadius: 12,
+                                padding: 9,
+                                background: '#f0fdf4',
+                                border: '1px solid #bbf7d0',
+                                color: '#166534',
+                                fontSize: 11,
+                                fontWeight: 800,
+                                lineHeight: 1.45,
+                              }}
+                            >
+                              Oferta escolhida: {selectedOfferSummary}
+                            </span>
+                          ) : null}
                         </button>
 
                         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -814,6 +1148,17 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                             style={getPreSimulationButtonStyle(updatingId === lead.id)}
                           >
                             Pré-simular
+                          </button>
+                        ) : null}
+
+                        {canOpenOffers ? (
+                          <button
+                            type="button"
+                            disabled={updatingId === lead.id}
+                            onClick={() => void openOffersModal(lead)}
+                            style={getOfferButtonStyle(updatingId === lead.id)}
+                          >
+                            Ofertas
                           </button>
                         ) : null}
 
@@ -938,6 +1283,13 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                   <strong>Pronto</strong>
                 </div>
               ) : null}
+
+              {getSelectedOfferSummary(selectedLead) ? (
+                <div className="metric-row">
+                  <span>Oferta escolhida</span>
+                  <strong>{getSelectedOfferSummary(selectedLead)}</strong>
+                </div>
+              ) : null}
             </div>
 
             {selectedLead.observacoes ? (
@@ -1020,6 +1372,27 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
               </button>
             ) : null}
 
+            {canManageOffers(selectedLead) ? (
+              <button
+                type="button"
+                disabled={updatingId === selectedLead.id}
+                onClick={() => void openOffersModal(selectedLead)}
+                style={{
+                  width: '100%',
+                  border: '1px solid #bfdbfe',
+                  borderRadius: 12,
+                  padding: '12px 14px',
+                  background: '#eff6ff',
+                  color: '#1d4ed8',
+                  cursor: 'pointer',
+                  fontWeight: 900,
+                  marginTop: 10,
+                }}
+              >
+                Ofertas
+              </button>
+            ) : null}
+
             <button
               type="button"
               disabled={closingId === selectedLead.id}
@@ -1038,6 +1411,269 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
             >
               Finalizar atendimento
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {offerLead ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.62)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 95,
+            padding: 20,
+          }}
+          onClick={closeOffersModal}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: '100%',
+              maxWidth: 980,
+              maxHeight: '92vh',
+              overflow: 'auto',
+              background: '#fff',
+              borderRadius: 22,
+              padding: 22,
+              boxShadow: '0 24px 80px rgba(15, 23, 42, 0.28)',
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header" style={{ marginBottom: 16 }}>
+              <div>
+                <span className="eyebrow">Ofertas manuais</span>
+                <h2>{offerLead.nome || 'Lead sem nome'}</h2>
+                <p className="panel-subtitle">
+                  Cadastre as propostas simuladas nos bancos e envie ao cliente em carrossel no WhatsApp.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeOffersModal}
+                style={{
+                  border: 0,
+                  borderRadius: 999,
+                  background: '#0f172a',
+                  color: '#fff',
+                  padding: '9px 14px',
+                  cursor: 'pointer',
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+
+            {offerLoading ? (
+              <div className="feedback-banner glass-card">Carregando ofertas...</div>
+            ) : null}
+
+            {getSelectedOfferSummary(offerLead) ? (
+              <div
+                style={{
+                  borderRadius: 16,
+                  padding: 14,
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  color: '#166534',
+                  fontSize: 13,
+                  fontWeight: 800,
+                  marginBottom: 14,
+                }}
+              >
+                Oferta escolhida pelo cliente: {getSelectedOfferSummary(offerLead)}
+              </div>
+            ) : null}
+
+            <div style={{ display: 'grid', gap: 14 }}>
+              {offerForms.map((offer, index) => (
+                <div
+                  key={offer.offer_number}
+                  style={{
+                    borderRadius: 18,
+                    padding: 16,
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    display: 'grid',
+                    gap: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 10,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <strong style={{ color: '#0f172a' }}>Oferta {offer.offer_number}</strong>
+
+                    {offer.status && offer.status !== 'draft' ? (
+                      <span
+                        style={{
+                          borderRadius: 999,
+                          padding: '6px 10px',
+                          background:
+                            offer.status === 'chosen'
+                              ? '#dcfce7'
+                              : offer.status === 'sent'
+                                ? '#dbeafe'
+                                : '#f1f5f9',
+                          border:
+                            offer.status === 'chosen'
+                              ? '1px solid #86efac'
+                              : offer.status === 'sent'
+                                ? '1px solid #bfdbfe'
+                                : '1px solid #cbd5e1',
+                          color:
+                            offer.status === 'chosen'
+                              ? '#166534'
+                              : offer.status === 'sent'
+                                ? '#1d4ed8'
+                                : '#475569',
+                          fontSize: 12,
+                          fontWeight: 800,
+                        }}
+                      >
+                        {offer.status === 'chosen'
+                          ? 'Escolhida'
+                          : offer.status === 'sent'
+                            ? 'Enviada'
+                            : offer.status === 'discarded'
+                              ? 'Descartada'
+                              : 'Rascunho'}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                      gap: 12,
+                    }}
+                  >
+                    <label>
+                      <span style={{ color: '#0f172a', fontWeight: 700 }}>Banco</span>
+                      <input
+                        value={offer.bank_name}
+                        onChange={(event) => updateOfferField(index, 'bank_name', event.target.value)}
+                        placeholder="Ex.: Zili"
+                      />
+                    </label>
+
+                    <label>
+                      <span style={{ color: '#0f172a', fontWeight: 700 }}>Valor liberado</span>
+                      <input
+                        value={offer.released_amount}
+                        onChange={(event) => updateOfferField(index, 'released_amount', event.target.value)}
+                        placeholder="Ex.: 4200,00"
+                      />
+                    </label>
+
+                    <label>
+                      <span style={{ color: '#0f172a', fontWeight: 700 }}>Parcela</span>
+                      <input
+                        value={offer.installment_amount}
+                        onChange={(event) => updateOfferField(index, 'installment_amount', event.target.value)}
+                        placeholder="Ex.: 218,40"
+                      />
+                    </label>
+
+                    <label>
+                      <span style={{ color: '#0f172a', fontWeight: 700 }}>Prazo</span>
+                      <input
+                        value={offer.term_months}
+                        onChange={(event) => updateOfferField(index, 'term_months', event.target.value)}
+                        placeholder="Ex.: 24"
+                      />
+                    </label>
+
+                    <label>
+                      <span style={{ color: '#0f172a', fontWeight: 700 }}>Taxa</span>
+                      <input
+                        value={offer.interest_rate}
+                        onChange={(event) => updateOfferField(index, 'interest_rate', event.target.value)}
+                        placeholder="Ex.: 2,05"
+                      />
+                    </label>
+
+                    <label>
+                      <span style={{ color: '#0f172a', fontWeight: 700 }}>Resumo</span>
+                      <input
+                        value={
+                          offer.bank_name
+                            ? `${offer.bank_name} • ${formatMoneyOptional(parseBrazilianDecimal(offer.released_amount))}`
+                            : ''
+                        }
+                        readOnly
+                        placeholder="Gerado automaticamente"
+                      />
+                    </label>
+                  </div>
+
+                  <label>
+                    <span style={{ color: '#0f172a', fontWeight: 700 }}>Observação</span>
+                    <textarea
+                      rows={2}
+                      value={offer.description}
+                      onChange={(event) => updateOfferField(index, 'description', event.target.value)}
+                      placeholder="Ex.: Melhor valor liberado, menor parcela, aprovação mais rápida..."
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 10,
+                marginTop: 18,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => void saveOffers()}
+                disabled={offerSaving || offerSending}
+                style={{
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 12,
+                  padding: '12px 14px',
+                  background: '#fff',
+                  color: '#0f172a',
+                  cursor: offerSaving || offerSending ? 'not-allowed' : 'pointer',
+                  fontWeight: 900,
+                }}
+              >
+                {offerSaving ? 'Salvando...' : 'Salvar ofertas'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void sendOffers()}
+                disabled={offerSaving || offerSending}
+                style={{
+                  border: 0,
+                  borderRadius: 12,
+                  padding: '12px 14px',
+                  background: 'linear-gradient(180deg, #6ee7f9, #4cc9f0)',
+                  color: '#071018',
+                  cursor: offerSaving || offerSending ? 'not-allowed' : 'pointer',
+                  fontWeight: 900,
+                }}
+              >
+                {offerSending ? 'Enviando...' : 'Enviar propostas'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
