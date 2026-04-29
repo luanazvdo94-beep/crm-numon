@@ -3,9 +3,9 @@ import IndicacoesPage from './pages/IndicacoesPage';
 import IndicatorsPage from './pages/IndicatorsPage';
 import TemplatesWhatsAppPage from './pages/TemplatesWhatsAppPage';
 import DisparoMassaPage from './pages/DisparoMassaPage';
-import HistoricoDisparosPage from './pages/HistoricoDisparosPage'; // ✅ NOVO
+import HistoricoDisparosPage from './pages/HistoricoDisparosPage';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { AppHeader } from './components/AppHeader';
 import { AuthScreen } from './components/AuthScreen';
@@ -29,6 +29,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [preSimulationLeadId, setPreSimulationLeadId] = useState<string | null>(null);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -46,32 +47,75 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  const loadLeads = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!session?.user) return;
+
+      const silent = Boolean(options?.silent);
+
+      if (!silent) {
+        setLoading(true);
+        setFeedback(null);
+      }
+
+      const { data, error } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        if (!silent) {
+          setFeedback(error.message);
+          setLoading(false);
+        }
+
+        return;
+      }
+
+      setLeads((data ?? []) as LeadRecord[]);
+
+      if (!silent) {
+        setLoading(false);
+      }
+    },
+    [session?.user]
+  );
+
   useEffect(() => {
     if (!session?.user) return;
     void loadLeads();
-  }, [session?.user?.id]);
+  }, [session?.user?.id, loadLeads]);
 
-  async function loadLeads() {
-    if (!session?.user) return;
+  useEffect(() => {
+    if (!session?.user || activeTab !== 'funil') return;
 
-    setLoading(true);
-    setFeedback(null);
+    let cancelled = false;
+    let running = false;
 
-    const { data, error } = await supabase
-      .from('leads')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .order('updated_at', { ascending: false });
+    const refreshFunnel = async () => {
+      if (cancelled || running) return;
 
-    if (error) {
-      setFeedback(error.message);
-      setLoading(false);
-      return;
-    }
+      running = true;
 
-    setLeads((data ?? []) as LeadRecord[]);
-    setLoading(false);
-  }
+      try {
+        await loadLeads({ silent: true });
+      } finally {
+        running = false;
+      }
+    };
+
+    void refreshFunnel();
+
+    const intervalId = window.setInterval(() => {
+      void refreshFunnel();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeTab, session?.user?.id, loadLeads]);
 
   async function handleSave() {
     if (!session?.user) return;
@@ -138,12 +182,27 @@ export default function App() {
     setLeads([]);
     setForm(DEFAULT_FORM);
     setEditingId(null);
+    setPreSimulationLeadId(null);
   }
 
   function handleExport() {
     const csv = exportLeadsToCsv(filteredLeads);
     const stamp = new Date().toISOString().slice(0, 10);
     downloadCsv(csv, `numon-crm-${stamp}.csv`);
+  }
+
+  function handleTabChange(tab: TabKey) {
+    setActiveTab(tab);
+
+    if (tab !== 'pre-simulador-clt') {
+      setPreSimulationLeadId(null);
+    }
+  }
+
+  function handlePreSimulateLead(leadId: string) {
+    setPreSimulationLeadId(leadId);
+    setActiveTab('pre-simulador-clt');
+    setFeedback('Abrindo Pré-simulador CLT com os dados do lead selecionado.');
   }
 
   const filteredLeads = useMemo(() => {
@@ -187,7 +246,7 @@ export default function App() {
           loading={loading}
         />
 
-        <TabsBar activeTab={activeTab} onChange={setActiveTab} />
+        <TabsBar activeTab={activeTab} onChange={handleTabChange} />
 
         {feedback ? <div className="feedback-banner glass-card">{feedback}</div> : null}
 
@@ -215,15 +274,23 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'funil' && <FunnelView leads={filteredLeads} />}
-        {activeTab === 'pre-simulador-clt' && <CltPreSimulator />}
+        {activeTab === 'funil' && (
+          <FunnelView
+            leads={filteredLeads}
+            onPreSimulateLead={handlePreSimulateLead}
+          />
+        )}
+
+        {activeTab === 'pre-simulador-clt' && (
+          <CltPreSimulator preSimulationLeadId={preSimulationLeadId} />
+        )}
+
         {activeTab === 'indicators' && <IndicatorsPage />}
         {activeTab === 'indicacoes' && <IndicacoesPage />}
 
         {activeTab === 'templates-whatsapp' && <TemplatesWhatsAppPage />}
         {activeTab === 'disparo-massa' && <DisparoMassaPage />}
 
-        {/* ✅ NOVA ABA FUNCIONANDO */}
         {activeTab === 'historico-disparos' && <HistoricoDisparosPage />}
       </main>
     </div>
