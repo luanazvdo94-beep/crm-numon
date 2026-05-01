@@ -4,6 +4,26 @@ import { supabase } from '../supabase';
 import type { LeadRecord } from '../types';
 
 type LeadRecordWithOperationalFields = LeadRecord & {
+  cpf?: string | null;
+  rg?: string | null;
+  document_uf?: string | null;
+  mother_name?: string | null;
+  email?: string | null;
+  marital_status?: string | null;
+  cep?: string | null;
+  full_address?: string | null;
+  city_state?: string | null;
+  bank_name?: string | null;
+  bank_agency?: string | null;
+  bank_account?: string | null;
+  pix_key?: string | null;
+  data_validation_preference?: string | null;
+  signature_link?: string | null;
+  signature_sent_at?: string | null;
+  signature_confirmation_requested_at?: string | null;
+  signature_confirmed_by_client_at?: string | null;
+  signed_at?: string | null;
+
   clt_ready_for_presimulation?: boolean | null;
   clt_triage_completed_at?: string | null;
   last_client_interaction_at?: string | null;
@@ -40,6 +60,23 @@ type LeadOfferRecord = {
   chosen_at?: string | null;
 };
 
+type ContractDataForm = {
+  nome: string;
+  cpf: string;
+  rg: string;
+  document_uf: string;
+  mother_name: string;
+  email: string;
+  marital_status: string;
+  cep: string;
+  full_address: string;
+  city_state: string;
+  bank_account: string;
+  bank_agency: string;
+  pix_key: string;
+  bank_name: string;
+};
+
 interface FunnelViewProps {
   leads: LeadRecord[];
   onPreSimulateLead?: (leadId: string) => void;
@@ -50,6 +87,7 @@ const KANBAN_STAGES = [
   'Em atendimento',
   'Vai analisar',
   'Em proposta',
+  'Em digitação',
   'Assinado',
   'Pago',
   'Pós-venda',
@@ -60,6 +98,9 @@ const FUNNEL_AUTOMATION_ENDPOINT =
 
 const SEND_LEAD_OFFERS_ENDPOINT =
   'https://nodejs-production-15c2.up.railway.app/send-lead-offers';
+
+const SEND_SIGNATURE_LINK_ENDPOINT =
+  'https://nodejs-production-15c2.up.railway.app/send-signature-link';
 
 const TEMPLATE_BY_STAGE: Record<string, string> = {
   'Em proposta': 'proposta_clt',
@@ -96,6 +137,48 @@ function createEmptyOffer(offerNumber: number): LeadOfferRecord {
 
 function createEmptyOffers() {
   return [1, 2, 3, 4, 5].map(createEmptyOffer);
+}
+
+function createEmptyContractDataForm(): ContractDataForm {
+  return {
+    nome: '',
+    cpf: '',
+    rg: '',
+    document_uf: '',
+    mother_name: '',
+    email: '',
+    marital_status: '',
+    cep: '',
+    full_address: '',
+    city_state: '',
+    bank_account: '',
+    bank_agency: '',
+    pix_key: '',
+    bank_name: '',
+  };
+}
+
+function createContractDataFormFromLead(lead: LeadRecord | null): ContractDataForm {
+  if (!lead) return createEmptyContractDataForm();
+
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+
+  return {
+    nome: lead.nome || '',
+    cpf: extendedLead.cpf || '',
+    rg: extendedLead.rg || '',
+    document_uf: extendedLead.document_uf || '',
+    mother_name: extendedLead.mother_name || '',
+    email: extendedLead.email || '',
+    marital_status: extendedLead.marital_status || '',
+    cep: extendedLead.cep || '',
+    full_address: extendedLead.full_address || '',
+    city_state: extendedLead.city_state || '',
+    bank_account: extendedLead.bank_account || '',
+    bank_agency: extendedLead.bank_agency || '',
+    pix_key: extendedLead.pix_key || '',
+    bank_name: extendedLead.bank_name || '',
+  };
 }
 
 function formatMoney(value: number) {
@@ -179,7 +262,9 @@ function isArchivedLead(lead: LeadRecord) {
 
 function canPreSimulateLead(lead: LeadRecord) {
   const extendedLead = lead as LeadRecordWithOperationalFields;
-  return extendedLead.clt_ready_for_presimulation === true;
+  const stage = normalizeStage(lead);
+
+  return extendedLead.clt_ready_for_presimulation === true && stage === 'Em proposta';
 }
 
 function canManageOffers(lead: LeadRecord) {
@@ -187,9 +272,19 @@ function canManageOffers(lead: LeadRecord) {
   return stage === 'Em proposta';
 }
 
+function canManageDigitation(lead: LeadRecord) {
+  const stage = normalizeStage(lead);
+  return stage === 'Em digitação';
+}
+
 function getSelectedOfferSummary(lead: LeadRecord) {
   const extendedLead = lead as LeadRecordWithOperationalFields;
   return extendedLead.selected_offer_summary || null;
+}
+
+function getSignatureLink(lead: LeadRecord) {
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+  return extendedLead.signature_link || null;
 }
 
 function getActiveOfferRound(lead: LeadRecord | null) {
@@ -251,6 +346,36 @@ function getOfferButtonStyle(disabled: boolean): React.CSSProperties {
     padding: '9px 10px',
     background: disabled ? '#f1f5f9' : '#eff6ff',
     color: disabled ? '#94a3b8' : '#1d4ed8',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 12,
+    fontWeight: 900,
+    marginTop: 8,
+  };
+}
+
+function getDigitationButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    width: '100%',
+    border: '1px solid #fed7aa',
+    borderRadius: 10,
+    padding: '9px 10px',
+    background: disabled ? '#f1f5f9' : '#fff7ed',
+    color: disabled ? '#94a3b8' : '#c2410c',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 12,
+    fontWeight: 900,
+    marginTop: 8,
+  };
+}
+
+function getSignatureButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    width: '100%',
+    border: '1px solid #bbf7d0',
+    borderRadius: 10,
+    padding: '9px 10px',
+    background: disabled ? '#f1f5f9' : '#f0fdf4',
+    color: disabled ? '#94a3b8' : '#166534',
     cursor: disabled ? 'not-allowed' : 'pointer',
     fontSize: 12,
     fontWeight: 900,
@@ -332,6 +457,27 @@ function getCurrentMonthLabel() {
   }).format(new Date());
 }
 
+function buildContractDataText(form: ContractDataForm) {
+  return [
+    'DADOS PARA DIGITAÇÃO',
+    '',
+    `Nome completo: ${form.nome || '-'}`,
+    `CPF: ${form.cpf || '-'}`,
+    `RG: ${form.rg || '-'}`,
+    `UF de emissão do documento: ${form.document_uf || '-'}`,
+    `Nome da mãe: ${form.mother_name || '-'}`,
+    `Email: ${form.email || '-'}`,
+    `Estado civil: ${form.marital_status || '-'}`,
+    `CEP: ${form.cep || '-'}`,
+    `Endereço completo: ${form.full_address || '-'}`,
+    `Cidade e Estado: ${form.city_state || '-'}`,
+    `Conta com dígito: ${form.bank_account || '-'}`,
+    `Agência com dígito: ${form.bank_agency || '-'}`,
+    `PIX: ${form.pix_key || '-'}`,
+    `Banco: ${form.bank_name || '-'}`,
+  ].join('\n');
+}
+
 export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
   const [localLeads, setLocalLeads] = useState<LeadRecord[]>(leads);
   const [selectedLead, setSelectedLead] = useState<LeadRecord | null>(null);
@@ -349,6 +495,17 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
   const [offerSaving, setOfferSaving] = useState(false);
   const [offerSending, setOfferSending] = useState(false);
   const [changingOffers, setChangingOffers] = useState(false);
+
+  const [contractDataLead, setContractDataLead] = useState<LeadRecord | null>(null);
+  const [contractDataForm, setContractDataForm] = useState<ContractDataForm>(
+    createEmptyContractDataForm,
+  );
+  const [contractDataSaving, setContractDataSaving] = useState(false);
+  const [contractDataCopying, setContractDataCopying] = useState(false);
+
+  const [signatureLead, setSignatureLead] = useState<LeadRecord | null>(null);
+  const [signatureLink, setSignatureLink] = useState('');
+  const [signatureSending, setSignatureSending] = useState(false);
 
   useEffect(() => {
     setLocalLeads(leads);
@@ -413,7 +570,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
 
   function handlePreSimulate(lead: LeadRecord) {
     if (!canPreSimulateLead(lead)) {
-      setFeedback('Este lead ainda não está pronto para pré-simulação automática.');
+      setFeedback('Este lead ainda não está pronto para pré-simulação automática nesta etapa.');
       return;
     }
 
@@ -719,6 +876,198 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     }
   }
 
+  function openContractDataModal(lead: LeadRecord) {
+    setContractDataLead(lead);
+    setContractDataForm(createContractDataFormFromLead(lead));
+    setContractDataSaving(false);
+    setContractDataCopying(false);
+    setFeedback(null);
+  }
+
+  function closeContractDataModal() {
+    setContractDataLead(null);
+    setContractDataForm(createEmptyContractDataForm());
+    setContractDataSaving(false);
+    setContractDataCopying(false);
+  }
+
+  function updateContractDataField(field: keyof ContractDataForm, value: string) {
+    setContractDataForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  async function saveContractData() {
+    if (!contractDataLead) return false;
+
+    setContractDataSaving(true);
+    setFeedback(null);
+
+    const patch = {
+      nome: contractDataForm.nome.trim() || null,
+      cpf: contractDataForm.cpf.trim() || null,
+      rg: contractDataForm.rg.trim() || null,
+      document_uf: contractDataForm.document_uf.trim().toUpperCase() || null,
+      mother_name: contractDataForm.mother_name.trim() || null,
+      email: contractDataForm.email.trim() || null,
+      marital_status: contractDataForm.marital_status.trim() || null,
+      cep: contractDataForm.cep.trim() || null,
+      full_address: contractDataForm.full_address.trim() || null,
+      city_state: contractDataForm.city_state.trim() || null,
+      bank_account: contractDataForm.bank_account.trim() || null,
+      bank_agency: contractDataForm.bank_agency.trim() || null,
+      pix_key: contractDataForm.pix_key.trim() || null,
+      bank_name: contractDataForm.bank_name.trim() || null,
+      etapa: 'Em digitação',
+      status: 'Dados validados para digitação',
+      is_archived: false,
+    };
+
+    const { error } = await supabase
+      .from('leads')
+      .update(patch)
+      .eq('id', contractDataLead.id);
+
+    if (error) {
+      setFeedback(`Erro ao salvar dados de digitação: ${error.message}`);
+      setContractDataSaving(false);
+      return false;
+    }
+
+    setLocalLeads((current) =>
+      current.map((lead) =>
+        lead.id === contractDataLead.id
+          ? ({
+              ...lead,
+              ...patch,
+            } as LeadRecord)
+          : lead,
+      ),
+    );
+
+    if (selectedLead?.id === contractDataLead.id) {
+      setSelectedLead({
+        ...selectedLead,
+        ...patch,
+      } as LeadRecord);
+    }
+
+    setContractDataLead({
+      ...contractDataLead,
+      ...patch,
+    } as LeadRecord);
+
+    setFeedback('Dados para digitação salvos com sucesso.');
+    setContractDataSaving(false);
+    return true;
+  }
+
+  async function copyContractData() {
+    setContractDataCopying(true);
+
+    const saved = await saveContractData();
+
+    if (!saved) {
+      setContractDataCopying(false);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(buildContractDataText(contractDataForm));
+      setFeedback('Dados copiados para a área de transferência.');
+    } catch {
+      setFeedback('Dados salvos, mas não foi possível copiar automaticamente. Copie manualmente pelo modal.');
+    }
+
+    setContractDataCopying(false);
+  }
+
+  function openSignatureModal(lead: LeadRecord) {
+    setSignatureLead(lead);
+    setSignatureLink(getSignatureLink(lead) || '');
+    setSignatureSending(false);
+    setFeedback(null);
+  }
+
+  function closeSignatureModal() {
+    setSignatureLead(null);
+    setSignatureLink('');
+    setSignatureSending(false);
+  }
+
+  async function sendSignatureLink() {
+    if (!signatureLead) return;
+
+    const cleanLink = signatureLink.trim();
+
+    if (!cleanLink || !/^https?:\/\//i.test(cleanLink)) {
+      setFeedback('Informe um link válido começando com http ou https.');
+      return;
+    }
+
+    setSignatureSending(true);
+    setFeedback(null);
+
+    try {
+      const response = await fetch(SEND_SIGNATURE_LINK_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          leadId: signatureLead.id,
+          signatureLink: cleanLink,
+        }),
+      });
+
+      const responseData = await response.json().catch(() => null);
+
+      if (!response.ok || responseData?.success === false) {
+        const message =
+          responseData?.error || `Falha no envio do link de assinatura. HTTP ${response.status}`;
+        setFeedback(message);
+        setSignatureSending(false);
+        return;
+      }
+
+      const patch = {
+        signature_link: cleanLink,
+        signature_sent_at: responseData?.signatureSentAt || new Date().toISOString(),
+        etapa: 'Em digitação',
+        status: 'Link de assinatura enviado',
+        is_archived: false,
+      };
+
+      setLocalLeads((current) =>
+        current.map((lead) =>
+          lead.id === signatureLead.id
+            ? ({
+                ...lead,
+                ...patch,
+              } as LeadRecord)
+            : lead,
+        ),
+      );
+
+      if (selectedLead?.id === signatureLead.id) {
+        setSelectedLead({
+          ...selectedLead,
+          ...patch,
+        } as LeadRecord);
+      }
+
+      setFeedback('Link de assinatura enviado ao cliente. A confirmação será enviada automaticamente no WhatsApp.');
+      setSignatureSending(false);
+      closeSignatureModal();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido ao enviar link de assinatura.';
+      setFeedback(`Erro ao enviar link de assinatura: ${message}`);
+      setSignatureSending(false);
+    }
+  }
+
   function openClosureModal(lead: LeadRecord) {
     setClosingLead(lead);
     setClosureReason('');
@@ -954,6 +1303,60 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     return stages[index + 1];
   }
 
+  function renderLeadActionButtons(lead: LeadRecord) {
+    const canPreSimulate = canPreSimulateLead(lead);
+    const canOpenOffers = canManageOffers(lead);
+    const canOpenDigitation = canManageDigitation(lead);
+
+    return (
+      <>
+        {canPreSimulate ? (
+          <button
+            type="button"
+            disabled={updatingId === lead.id}
+            onClick={() => handlePreSimulate(lead)}
+            style={getPreSimulationButtonStyle(updatingId === lead.id)}
+          >
+            Pré-simular
+          </button>
+        ) : null}
+
+        {canOpenOffers ? (
+          <button
+            type="button"
+            disabled={updatingId === lead.id}
+            onClick={() => void openOffersModal(lead)}
+            style={getOfferButtonStyle(updatingId === lead.id)}
+          >
+            Ofertas
+          </button>
+        ) : null}
+
+        {canOpenDigitation ? (
+          <>
+            <button
+              type="button"
+              disabled={updatingId === lead.id}
+              onClick={() => openContractDataModal(lead)}
+              style={getDigitationButtonStyle(updatingId === lead.id)}
+            >
+              Dados para digitação
+            </button>
+
+            <button
+              type="button"
+              disabled={updatingId === lead.id}
+              onClick={() => openSignatureModal(lead)}
+              style={getSignatureButtonStyle(updatingId === lead.id)}
+            >
+              Enviar link de assinatura
+            </button>
+          </>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <section className="panel glass-card">
       <div className="panel-header">
@@ -1049,7 +1452,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(7, minmax(220px, 1fr))',
+          gridTemplateColumns: `repeat(${stages.length}, minmax(220px, 1fr))`,
           gap: 14,
           overflowX: 'auto',
           paddingBottom: 8,
@@ -1117,8 +1520,8 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                     const previousStage = getPreviousStage(currentStage);
                     const nextStage = getNextStage(currentStage);
                     const canPreSimulate = canPreSimulateLead(lead);
-                    const canOpenOffers = canManageOffers(lead);
                     const selectedOfferSummary = getSelectedOfferSummary(lead);
+                    const signatureLink = getSignatureLink(lead);
 
                     return (
                       <article
@@ -1201,6 +1604,25 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                               Oferta escolhida: {selectedOfferSummary}
                             </span>
                           ) : null}
+
+                          {signatureLink ? (
+                            <span
+                              style={{
+                                display: 'block',
+                                marginTop: 8,
+                                borderRadius: 12,
+                                padding: 9,
+                                background: '#fff7ed',
+                                border: '1px solid #fed7aa',
+                                color: '#c2410c',
+                                fontSize: 11,
+                                fontWeight: 800,
+                                lineHeight: 1.45,
+                              }}
+                            >
+                              Link de assinatura enviado
+                            </span>
+                          ) : null}
                         </button>
 
                         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -1241,27 +1663,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                           </button>
                         </div>
 
-                        {canPreSimulate ? (
-                          <button
-                            type="button"
-                            disabled={updatingId === lead.id}
-                            onClick={() => handlePreSimulate(lead)}
-                            style={getPreSimulationButtonStyle(updatingId === lead.id)}
-                          >
-                            Pré-simular
-                          </button>
-                        ) : null}
-
-                        {canOpenOffers ? (
-                          <button
-                            type="button"
-                            disabled={updatingId === lead.id}
-                            onClick={() => void openOffersModal(lead)}
-                            style={getOfferButtonStyle(updatingId === lead.id)}
-                          >
-                            Ofertas
-                          </button>
-                        ) : null}
+                        {renderLeadActionButtons(lead)}
 
                         <button
                           type="button"
@@ -1391,6 +1793,13 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                   <strong>{getSelectedOfferSummary(selectedLead)}</strong>
                 </div>
               ) : null}
+
+              {getSignatureLink(selectedLead) ? (
+                <div className="metric-row">
+                  <span>Assinatura</span>
+                  <strong>Link enviado</strong>
+                </div>
+              ) : null}
             </div>
 
             {selectedLead.observacoes ? (
@@ -1452,47 +1861,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
               </button>
             </div>
 
-            {canPreSimulateLead(selectedLead) ? (
-              <button
-                type="button"
-                disabled={updatingId === selectedLead.id}
-                onClick={() => handlePreSimulate(selectedLead)}
-                style={{
-                  width: '100%',
-                  border: 0,
-                  borderRadius: 12,
-                  padding: '12px 14px',
-                  background: 'linear-gradient(180deg, #6ee7f9, #4cc9f0)',
-                  color: '#071018',
-                  cursor: 'pointer',
-                  fontWeight: 900,
-                  marginTop: 10,
-                }}
-              >
-                Pré-simular
-              </button>
-            ) : null}
-
-            {canManageOffers(selectedLead) ? (
-              <button
-                type="button"
-                disabled={updatingId === selectedLead.id}
-                onClick={() => void openOffersModal(selectedLead)}
-                style={{
-                  width: '100%',
-                  border: '1px solid #bfdbfe',
-                  borderRadius: 12,
-                  padding: '12px 14px',
-                  background: '#eff6ff',
-                  color: '#1d4ed8',
-                  cursor: 'pointer',
-                  fontWeight: 900,
-                  marginTop: 10,
-                }}
-              >
-                Ofertas
-              </button>
-            ) : null}
+            {renderLeadActionButtons(selectedLead)}
 
             <button
               type="button"
@@ -1791,6 +2160,389 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                 }}
               >
                 {offerSending ? 'Enviando...' : 'Enviar propostas'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {contractDataLead ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.62)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            padding: 20,
+          }}
+          onClick={closeContractDataModal}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: '100%',
+              maxWidth: 980,
+              maxHeight: '92vh',
+              overflow: 'auto',
+              background: '#fff',
+              borderRadius: 22,
+              padding: 22,
+              boxShadow: '0 24px 80px rgba(15, 23, 42, 0.28)',
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header" style={{ marginBottom: 16 }}>
+              <div>
+                <span className="eyebrow">Dados para digitação</span>
+                <h2>{contractDataLead.nome || 'Lead sem nome'}</h2>
+                <p className="panel-subtitle">
+                  Preencha, salve e copie os dados para digitar a proposta no banco.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeContractDataModal}
+                style={{
+                  border: 0,
+                  borderRadius: 999,
+                  background: '#0f172a',
+                  color: '#fff',
+                  padding: '9px 14px',
+                  cursor: 'pointer',
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 12,
+              }}
+            >
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Nome completo</span>
+                <input
+                  value={contractDataForm.nome}
+                  onChange={(event) => updateContractDataField('nome', event.target.value)}
+                  placeholder="Nome completo"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>CPF</span>
+                <input
+                  value={contractDataForm.cpf}
+                  onChange={(event) => updateContractDataField('cpf', event.target.value)}
+                  placeholder="CPF"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>RG</span>
+                <input
+                  value={contractDataForm.rg}
+                  onChange={(event) => updateContractDataField('rg', event.target.value)}
+                  placeholder="RG"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>UF de emissão do documento</span>
+                <input
+                  value={contractDataForm.document_uf}
+                  onChange={(event) => updateContractDataField('document_uf', event.target.value)}
+                  placeholder="Ex.: PI"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Nome da mãe</span>
+                <input
+                  value={contractDataForm.mother_name}
+                  onChange={(event) => updateContractDataField('mother_name', event.target.value)}
+                  placeholder="Nome da mãe"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Email</span>
+                <input
+                  value={contractDataForm.email}
+                  onChange={(event) => updateContractDataField('email', event.target.value)}
+                  placeholder="email@exemplo.com"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Estado civil</span>
+                <input
+                  value={contractDataForm.marital_status}
+                  onChange={(event) => updateContractDataField('marital_status', event.target.value)}
+                  placeholder="Solteiro, casado..."
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>CEP</span>
+                <input
+                  value={contractDataForm.cep}
+                  onChange={(event) => updateContractDataField('cep', event.target.value)}
+                  placeholder="CEP"
+                />
+              </label>
+
+              <label style={{ gridColumn: '1 / -1' }}>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Endereço completo</span>
+                <input
+                  value={contractDataForm.full_address}
+                  onChange={(event) => updateContractDataField('full_address', event.target.value)}
+                  placeholder="Rua, número, bairro, complemento"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Cidade e Estado</span>
+                <input
+                  value={contractDataForm.city_state}
+                  onChange={(event) => updateContractDataField('city_state', event.target.value)}
+                  placeholder="Teresina/PI"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Banco</span>
+                <input
+                  value={contractDataForm.bank_name}
+                  onChange={(event) => updateContractDataField('bank_name', event.target.value)}
+                  placeholder="Banco para recebimento"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Agência com dígito</span>
+                <input
+                  value={contractDataForm.bank_agency}
+                  onChange={(event) => updateContractDataField('bank_agency', event.target.value)}
+                  placeholder="Agência com dígito"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Conta com dígito</span>
+                <input
+                  value={contractDataForm.bank_account}
+                  onChange={(event) => updateContractDataField('bank_account', event.target.value)}
+                  placeholder="Conta com dígito"
+                />
+              </label>
+
+              <label style={{ gridColumn: '1 / -1' }}>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>PIX</span>
+                <input
+                  value={contractDataForm.pix_key}
+                  onChange={(event) => updateContractDataField('pix_key', event.target.value)}
+                  placeholder="Chave PIX"
+                />
+              </label>
+            </div>
+
+            <div
+              style={{
+                marginTop: 16,
+                borderRadius: 16,
+                border: '1px solid #e2e8f0',
+                background: '#f8fafc',
+                padding: 14,
+              }}
+            >
+              <strong style={{ color: '#0f172a' }}>Prévia para copiar</strong>
+              <pre
+                style={{
+                  margin: '10px 0 0',
+                  whiteSpace: 'pre-wrap',
+                  color: '#334155',
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                }}
+              >
+                {buildContractDataText(contractDataForm)}
+              </pre>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 10,
+                marginTop: 18,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => void saveContractData()}
+                disabled={contractDataSaving || contractDataCopying}
+                style={{
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 12,
+                  padding: '12px 14px',
+                  background: '#fff',
+                  color: '#0f172a',
+                  cursor: contractDataSaving || contractDataCopying ? 'not-allowed' : 'pointer',
+                  fontWeight: 900,
+                }}
+              >
+                {contractDataSaving ? 'Salvando...' : 'Salvar dados'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void copyContractData()}
+                disabled={contractDataSaving || contractDataCopying}
+                style={{
+                  border: 0,
+                  borderRadius: 12,
+                  padding: '12px 14px',
+                  background: '#0f172a',
+                  color: '#fff',
+                  cursor: contractDataSaving || contractDataCopying ? 'not-allowed' : 'pointer',
+                  fontWeight: 900,
+                }}
+              >
+                {contractDataCopying ? 'Copiando...' : 'Salvar e copiar dados'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {signatureLead ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.62)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 105,
+            padding: 20,
+          }}
+          onClick={closeSignatureModal}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: '100%',
+              maxWidth: 620,
+              background: '#fff',
+              borderRadius: 22,
+              padding: 22,
+              boxShadow: '0 24px 80px rgba(15, 23, 42, 0.28)',
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header" style={{ marginBottom: 16 }}>
+              <div>
+                <span className="eyebrow">Assinatura digital</span>
+                <h2>{signatureLead.nome || 'Lead sem nome'}</h2>
+                <p className="panel-subtitle">
+                  Cole o link gerado no banco. O CRM enviará o link ao cliente e depois perguntará se o contrato foi assinado.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeSignatureModal}
+                style={{
+                  border: 0,
+                  borderRadius: 999,
+                  background: '#0f172a',
+                  color: '#fff',
+                  padding: '9px 14px',
+                  cursor: 'pointer',
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+
+            <label>
+              <span style={{ color: '#0f172a', fontWeight: 700 }}>Link de assinatura</span>
+              <input
+                value={signatureLink}
+                onChange={(event) => setSignatureLink(event.target.value)}
+                placeholder="https://..."
+              />
+            </label>
+
+            <div
+              style={{
+                borderRadius: 16,
+                padding: 14,
+                background: '#fff7ed',
+                border: '1px solid #fed7aa',
+                color: '#9a3412',
+                fontSize: 13,
+                lineHeight: 1.5,
+                marginTop: 14,
+              }}
+            >
+              O botão “Contrato assinado” não será enviado junto com o link. Ele será enviado depois pelo backend,
+              evitando que o cliente confirme antes de abrir o contrato.
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 10,
+                marginTop: 18,
+              }}
+            >
+              <button
+                type="button"
+                onClick={closeSignatureModal}
+                disabled={signatureSending}
+                style={{
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 12,
+                  padding: '12px 14px',
+                  background: '#fff',
+                  color: '#0f172a',
+                  cursor: signatureSending ? 'not-allowed' : 'pointer',
+                  fontWeight: 900,
+                }}
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void sendSignatureLink()}
+                disabled={signatureSending}
+                style={{
+                  border: 0,
+                  borderRadius: 12,
+                  padding: '12px 14px',
+                  background: 'linear-gradient(180deg, #86efac, #22c55e)',
+                  color: '#052e16',
+                  cursor: signatureSending ? 'not-allowed' : 'pointer',
+                  fontWeight: 900,
+                }}
+              >
+                {signatureSending ? 'Enviando...' : 'Enviar link'}
               </button>
             </div>
           </div>
