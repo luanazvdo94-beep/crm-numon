@@ -18,6 +18,7 @@ type LeadRecordWithOperationalFields = LeadRecord & {
   selected_offer_id?: string | null;
   selected_offer_summary?: string | null;
   selected_offer_chosen_at?: string | null;
+  active_offer_round?: number | null;
 };
 
 type LeadOfferStatus = 'draft' | 'sent' | 'chosen' | 'discarded';
@@ -26,6 +27,7 @@ type LeadOfferRecord = {
   id?: string;
   lead_id?: string;
   user_id?: string;
+  offer_round?: number;
   offer_number: number;
   bank_name: string;
   released_amount: string;
@@ -190,6 +192,17 @@ function getSelectedOfferSummary(lead: LeadRecord) {
   return extendedLead.selected_offer_summary || null;
 }
 
+function getActiveOfferRound(lead: LeadRecord | null) {
+  if (!lead) return 1;
+
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+  const round = Number(extendedLead.active_offer_round || 1);
+
+  if (!Number.isFinite(round) || round <= 0) return 1;
+
+  return round;
+}
+
 function parseBrazilianDecimal(value: string) {
   const trimmed = String(value || '').trim();
 
@@ -335,6 +348,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
   const [offerLoading, setOfferLoading] = useState(false);
   const [offerSaving, setOfferSaving] = useState(false);
   const [offerSending, setOfferSending] = useState(false);
+  const [changingOffers, setChangingOffers] = useState(false);
 
   useEffect(() => {
     setLocalLeads(leads);
@@ -418,10 +432,13 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     setFeedback(null);
     setOfferLoading(true);
 
+    const activeRound = getActiveOfferRound(lead);
+
     const { data, error } = await supabase
       .from('lead_offers')
       .select('*')
       .eq('lead_id', lead.id)
+      .eq('offer_round', activeRound)
       .order('offer_number', { ascending: true });
 
     if (error) {
@@ -440,6 +457,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
           id: offer.id,
           lead_id: offer.lead_id,
           user_id: offer.user_id,
+          offer_round: Number(offer.offer_round || activeRound),
           offer_number: Number(offer.offer_number),
           bank_name: offer.bank_name || '',
           released_amount:
@@ -476,6 +494,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     setOfferLoading(false);
     setOfferSaving(false);
     setOfferSending(false);
+    setChangingOffers(false);
   }
 
   function updateOfferField(
@@ -499,6 +518,75 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     return offerForms.filter((offer) => offer.bank_name.trim().length > 0);
   }
 
+  async function startNewOfferRound() {
+    if (!offerLead) return;
+
+    const currentRound = getActiveOfferRound(offerLead);
+    const nextRound = currentRound + 1;
+
+    setChangingOffers(true);
+    setFeedback(null);
+
+    await supabase
+      .from('lead_offers')
+      .update({
+        status: 'discarded',
+      })
+      .eq('lead_id', offerLead.id)
+      .eq('offer_round', currentRound)
+      .in('status', ['draft', 'sent']);
+
+    const patch = {
+      active_offer_round: nextRound,
+      selected_offer_id: null,
+      selected_offer_summary: null,
+      selected_offer_chosen_at: null,
+      etapa: 'Em proposta',
+      status: 'Em proposta',
+      is_archived: false,
+    };
+
+    const { error } = await supabase
+      .from('leads')
+      .update(patch)
+      .eq('id', offerLead.id);
+
+    if (error) {
+      setFeedback(`Erro ao iniciar nova rodada de ofertas: ${error.message}`);
+      setChangingOffers(false);
+      return;
+    }
+
+    const updatedLead = {
+      ...offerLead,
+      ...patch,
+    } as LeadRecord;
+
+    setOfferLead(updatedLead);
+    setOfferForms(createEmptyOffers());
+
+    setLocalLeads((current) =>
+      current.map((lead) =>
+        lead.id === offerLead.id
+          ? ({
+              ...lead,
+              ...patch,
+            } as LeadRecord)
+          : lead,
+      ),
+    );
+
+    if (selectedLead?.id === offerLead.id) {
+      setSelectedLead({
+        ...selectedLead,
+        ...patch,
+      } as LeadRecord);
+    }
+
+    setFeedback(`Nova rodada de ofertas iniciada. Rodada atual: ${nextRound}.`);
+    setChangingOffers(false);
+  }
+
   async function saveOffers() {
     if (!offerLead) return false;
 
@@ -508,6 +596,8 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
       setFeedback('Cadastre pelo menos uma oferta com o nome do banco.');
       return false;
     }
+
+    const activeRound = getActiveOfferRound(offerLead);
 
     setOfferSaving(true);
     setFeedback(null);
@@ -525,10 +615,11 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
       .from('lead_offers')
       .delete()
       .eq('lead_id', offerLead.id)
+      .eq('offer_round', activeRound)
       .in('status', ['draft', 'sent', 'discarded']);
 
     if (deleteError) {
-      setFeedback(`Erro ao limpar ofertas anteriores: ${deleteError.message}`);
+      setFeedback(`Erro ao limpar ofertas anteriores da rodada atual: ${deleteError.message}`);
       setOfferSaving(false);
       return false;
     }
@@ -536,6 +627,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     const payload = validOffers.map((offer, index) => ({
       lead_id: offerLead.id,
       user_id: userId,
+      offer_round: activeRound,
       offer_number: index + 1,
       bank_name: offer.bank_name.trim(),
       released_amount: parseBrazilianDecimal(offer.released_amount),
@@ -556,7 +648,12 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
       return false;
     }
 
-    setFeedback(`${payload.length} oferta${payload.length === 1 ? '' : 's'} salva${payload.length === 1 ? '' : 's'} com sucesso.`);
+    setFeedback(
+      `${payload.length} oferta${payload.length === 1 ? '' : 's'} salva${
+        payload.length === 1 ? '' : 's'
+      } com sucesso na rodada ${activeRound}.`,
+    );
+
     setOfferSaving(false);
 
     await openOffersModal(offerLead);
@@ -597,7 +694,11 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
         return;
       }
 
-      setFeedback(`Propostas enviadas com sucesso para o WhatsApp. Total enviado: ${responseData?.sent || getValidOffersForSave().length}.`);
+      setFeedback(
+        `Propostas enviadas com sucesso para o WhatsApp. Rodada ${
+          responseData?.offerRound || getActiveOfferRound(offerLead)
+        }. Total enviado: ${responseData?.sent || getValidOffersForSave().length}.`,
+      );
 
       setLocalLeads((current) =>
         current.map((lead) =>
@@ -1450,7 +1551,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                 <span className="eyebrow">Ofertas manuais</span>
                 <h2>{offerLead.nome || 'Lead sem nome'}</h2>
                 <p className="panel-subtitle">
-                  Cadastre as propostas simuladas nos bancos e envie ao cliente em carrossel no WhatsApp.
+                  Rodada atual: {getActiveOfferRound(offerLead)}. Cadastre as propostas simuladas nos bancos e envie ao cliente em carrossel no WhatsApp.
                 </p>
               </div>
 
@@ -1487,7 +1588,25 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                   marginBottom: 14,
                 }}
               >
-                Oferta escolhida pelo cliente: {getSelectedOfferSummary(offerLead)}
+                <div>Oferta escolhida pelo cliente: {getSelectedOfferSummary(offerLead)}</div>
+
+                <button
+                  type="button"
+                  onClick={() => void startNewOfferRound()}
+                  disabled={changingOffers || offerSaving || offerSending}
+                  style={{
+                    marginTop: 12,
+                    border: '1px solid #86efac',
+                    borderRadius: 12,
+                    padding: '10px 12px',
+                    background: '#fff',
+                    color: '#166534',
+                    cursor: changingOffers || offerSaving || offerSending ? 'not-allowed' : 'pointer',
+                    fontWeight: 900,
+                  }}
+                >
+                  {changingOffers ? 'Preparando nova rodada...' : 'Mudar ofertas'}
+                </button>
               </div>
             ) : null}
 
@@ -1643,14 +1762,14 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
               <button
                 type="button"
                 onClick={() => void saveOffers()}
-                disabled={offerSaving || offerSending}
+                disabled={offerSaving || offerSending || changingOffers}
                 style={{
                   border: '1px solid #cbd5e1',
                   borderRadius: 12,
                   padding: '12px 14px',
                   background: '#fff',
                   color: '#0f172a',
-                  cursor: offerSaving || offerSending ? 'not-allowed' : 'pointer',
+                  cursor: offerSaving || offerSending || changingOffers ? 'not-allowed' : 'pointer',
                   fontWeight: 900,
                 }}
               >
@@ -1660,14 +1779,14 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
               <button
                 type="button"
                 onClick={() => void sendOffers()}
-                disabled={offerSaving || offerSending}
+                disabled={offerSaving || offerSending || changingOffers}
                 style={{
                   border: 0,
                   borderRadius: 12,
                   padding: '12px 14px',
                   background: 'linear-gradient(180deg, #6ee7f9, #4cc9f0)',
                   color: '#071018',
-                  cursor: offerSaving || offerSending ? 'not-allowed' : 'pointer',
+                  cursor: offerSaving || offerSending || changingOffers ? 'not-allowed' : 'pointer',
                   fontWeight: 900,
                 }}
               >
