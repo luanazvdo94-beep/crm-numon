@@ -24,6 +24,7 @@ type LeadRecordWithOperationalFields = LeadRecord & {
   signature_confirmed_by_client_at?: string | null;
   signed_at?: string | null;
   contract_number?: string | null;
+  paid_amount?: number | string | null;
   payment_date?: string | null;
   paid_at?: string | null;
 
@@ -82,6 +83,7 @@ type ContractDataForm = {
 
 type PaymentDataForm = {
   contract_number: string;
+  paid_amount: string;
   payment_date: string;
 };
 
@@ -192,6 +194,7 @@ function createContractDataFormFromLead(lead: LeadRecord | null): ContractDataFo
 function createEmptyPaymentDataForm(): PaymentDataForm {
   return {
     contract_number: '',
+    paid_amount: '',
     payment_date: '',
   };
 }
@@ -203,6 +206,10 @@ function createPaymentDataFormFromLead(lead: LeadRecord | null): PaymentDataForm
 
   return {
     contract_number: extendedLead.contract_number || '',
+    paid_amount:
+      extendedLead.paid_amount !== null && extendedLead.paid_amount !== undefined
+        ? String(extendedLead.paid_amount).replace('.', ',')
+        : '',
     payment_date: extendedLead.payment_date || '',
   };
 }
@@ -336,6 +343,15 @@ function getContractNumber(lead: LeadRecord) {
 function getPaymentDate(lead: LeadRecord) {
   const extendedLead = lead as LeadRecordWithOperationalFields;
   return extendedLead.payment_date || null;
+}
+
+function getPaidAmount(lead: LeadRecord) {
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+  const numeric = Number(extendedLead.paid_amount || 0);
+
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+
+  return numeric;
 }
 
 function formatDateBR(value?: string | null) {
@@ -628,15 +644,11 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     count: currentMonthLeads.filter((lead) => lead.status === status).length,
   }));
 
-  const closedValue = currentMonthLeads
-    .filter(
-      (lead) =>
-        lead.status === 'Fechado' ||
-        lead.etapa === 'Assinado' ||
-        lead.etapa === 'Pago' ||
-        lead.etapa === 'Pós-venda',
-    )
-    .reduce((sum, lead) => sum + (lead.valor_interesse ?? 0), 0);
+  const paidLeads = currentMonthLeads.filter((lead) => isLeadPaid(lead));
+
+  const paidValue = paidLeads.reduce((sum, lead) => sum + getPaidAmount(lead), 0);
+
+  const paidCount = paidLeads.length;
 
   const signedCount = currentMonthLeads.filter(
     (lead) =>
@@ -646,7 +658,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
       lead.etapa === 'Pós-venda',
   ).length;
 
-  const conversionRate = total > 0 ? Math.round((signedCount / total) * 100) : 0;
+  const conversionRate = total > 0 ? Math.round((paidCount / total) * 100) : 0;
 
   const stageMetrics = stages.map((stage, index) => {
     const count = currentMonthLeads.filter((lead) => normalizeStage(lead) === stage).length;
@@ -1237,6 +1249,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
 
     const patch = {
       contract_number: paymentForm.contract_number.trim() || null,
+      paid_amount: parseBrazilianDecimal(paymentForm.paid_amount),
       payment_date: paymentForm.payment_date || null,
       paid_at: new Date().toISOString(),
       etapa: 'Pago',
@@ -1611,55 +1624,62 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
 
       {feedback ? <div className="feedback-banner glass-card">{feedback}</div> : null}
 
-      <div className="stats-grid">
-        <article className="stat-card">
-          <span>Total de leads no mês</span>
-          <strong>{total}</strong>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(280px, 1.5fr) minmax(320px, 1fr)',
+          gap: 14,
+          marginTop: 18,
+          marginBottom: 18,
+        }}
+      >
+        <article
+          className="stat-card"
+          style={{
+            minHeight: 142,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            background: 'linear-gradient(135deg, #0f172a, #164e63)',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.12)',
+          }}
+        >
+          <div>
+            <span style={{ color: '#bae6fd', fontWeight: 800 }}>Valor pago no mês</span>
+            <strong style={{ display: 'block', marginTop: 12, fontSize: 34, color: '#fff' }}>
+              {formatMoney(paidValue)}
+            </strong>
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: '#e0f2fe', fontSize: 13 }}>
+            <span>{paidCount} contrato{paidCount === 1 ? '' : 's'} pago{paidCount === 1 ? '' : 's'}</span>
+            <span>•</span>
+            <span>{getCurrentMonthLabel()}</span>
+          </div>
         </article>
 
-        <article className="stat-card">
-          <span>Conversão do mês</span>
-          <strong>{conversionRate}%</strong>
-        </article>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <article className="stat-card">
+            <span>Leads ativos</span>
+            <strong>{activeCurrentMonthLeads.length}</strong>
+          </article>
 
-        <article className="stat-card">
-          <span>Fechados no mês</span>
-          <strong>{signedCount}</strong>
-        </article>
+          <article className="stat-card">
+            <span>Pagos</span>
+            <strong>{paidCount}</strong>
+          </article>
 
-        <article className="stat-card">
-          <span>Volume fechado no mês</span>
-          <strong>{formatMoney(closedValue)}</strong>
-        </article>
-      </div>
+          <article className="stat-card">
+            <span>Assinados/fechados</span>
+            <strong>{signedCount}</strong>
+          </article>
 
-      <div className="stats-grid" style={{ marginBottom: 18 }}>
-        <article className="stat-card">
-          <span>Ativos no Kanban</span>
-          <strong>{activeCurrentMonthLeads.length}</strong>
-        </article>
-
-        <article className="stat-card">
-          <span>Finalizados no mês</span>
-          <strong>{archivedCurrentMonthLeads.length}</strong>
-        </article>
-
-        <article className="stat-card">
-          <span>Follow-ups futuros</span>
-          <strong>
-            {
-              archivedCurrentMonthLeads.filter((lead) => {
-                const extendedLead = lead as LeadRecordWithOperationalFields;
-                return extendedLead.followup_recommended === true;
-              }).length
-            }
-          </strong>
-        </article>
-
-        <article className="stat-card">
-          <span>Mês operacional</span>
-          <strong style={{ fontSize: '1rem' }}>{getCurrentMonthLabel()}</strong>
-        </article>
+          <article className="stat-card">
+            <span>Conversão em pago</span>
+            <strong>{conversionRate}%</strong>
+          </article>
+        </div>
       </div>
 
       <div className="funnel-columns" style={{ marginTop: 18 }}>
@@ -1865,6 +1885,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                               }}
                             >
                               PAGO
+                              {getPaidAmount(lead) > 0 ? <><br />Valor: {formatMoney(getPaidAmount(lead))}</> : null}
                               {contractNumber ? <><br />Contrato: {contractNumber}</> : null}
                               {paymentDate ? <><br />Pago em: {formatDateBR(paymentDate)}</> : null}
                             </span>
@@ -2912,6 +2933,15 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                   value={paymentForm.contract_number}
                   onChange={(event) => updatePaymentField('contract_number', event.target.value)}
                   placeholder="Ex.: 123456789"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Valor pago / contratado</span>
+                <input
+                  value={paymentForm.paid_amount}
+                  onChange={(event) => updatePaymentField('paid_amount', event.target.value)}
+                  placeholder="Ex.: 5000,00"
                 />
               </label>
 
