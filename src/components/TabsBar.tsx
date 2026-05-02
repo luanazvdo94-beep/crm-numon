@@ -9,8 +9,6 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: 'indicacoes', label: 'Indicações' },
   { key: 'templates-whatsapp', label: 'Templates WhatsApp' },
   { key: 'disparo-massa', label: 'Disparo em Massa' },
-
-  // NOVA ABA
   { key: 'historico-disparos', label: 'Histórico de Disparos' },
 ];
 
@@ -21,7 +19,7 @@ interface TabsBarProps {
 
 export function TabsBar({ activeTab, onChange }: TabsBarProps) {
   return (
-    <nav className="tabs-bar glass-card">
+    <nav className="tabs-bar glass-card" aria-label="Navegação principal do CRM">
       {tabs.map((tab) => (
         <button
           key={tab.key}

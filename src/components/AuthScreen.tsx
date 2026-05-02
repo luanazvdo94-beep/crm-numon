@@ -5,6 +5,8 @@ interface AuthScreenProps {
   onAuthenticated: () => void;
 }
 
+const CRM_LOGO_SRC = '/oncrm-logo.png';
+
 export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,7 +15,7 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const [message, setMessage] = useState<string | null>(null);
 
   const title = useMemo(
-    () => (mode === 'login' ? 'Entrar no NumOn CRM' : 'Criar acesso ao NumOn CRM'),
+    () => (mode === 'login' ? 'Acesse sua operação' : 'Criar acesso ao CRM'),
     [mode],
   );
 
@@ -43,9 +45,22 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
     <div className="auth-shell">
       <div className="auth-card glass-card">
         <div className="brand-block">
-          <span className="eyebrow">NUMON CRM</span>
+          <img
+            className="auth-logo"
+            src={CRM_LOGO_SRC}
+            alt="ON CRM"
+            onError={(event) => {
+              event.currentTarget.style.display = 'none';
+            }}
+          />
+
+          <div className="auth-logo-fallback">
+            <strong>ON</strong>
+            <span>CRM</span>
+          </div>
+
           <h1>{title}</h1>
-          <p>CRM clean, dark premium e centrado em estabilidade operacional.</p>
+          <p>Gestão comercial, funil operacional e atendimento integrado em um ambiente seguro.</p>
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
