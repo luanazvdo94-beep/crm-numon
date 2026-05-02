@@ -287,6 +287,15 @@ function getSignatureLink(lead: LeadRecord) {
   return extendedLead.signature_link || null;
 }
 
+function isLeadSigned(lead: LeadRecord) {
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+  return (
+    normalizeStage(lead) === 'Assinado' ||
+    Boolean(extendedLead.signed_at) ||
+    Boolean(extendedLead.signature_confirmed_by_client_at)
+  );
+}
+
 function getActiveOfferRound(lead: LeadRecord | null) {
   if (!lead) return 1;
 
@@ -376,6 +385,21 @@ function getSignatureButtonStyle(disabled: boolean): React.CSSProperties {
     padding: '9px 10px',
     background: disabled ? '#f1f5f9' : '#f0fdf4',
     color: disabled ? '#94a3b8' : '#166534',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 12,
+    fontWeight: 900,
+    marginTop: 8,
+  };
+}
+
+function getPendingSignatureButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    width: '100%',
+    border: '1px solid #fed7aa',
+    borderRadius: 10,
+    padding: '9px 10px',
+    background: disabled ? '#f1f5f9' : '#fff7ed',
+    color: disabled ? '#94a3b8' : '#c2410c',
     cursor: disabled ? 'not-allowed' : 'pointer',
     fontSize: 12,
     fontWeight: 900,
@@ -1068,6 +1092,51 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     }
   }
 
+  async function markSignatureAsPending(lead: LeadRecord) {
+    setUpdatingId(lead.id);
+    setFeedback(null);
+
+    const patch = {
+      etapa: 'Em digitação',
+      status: 'Link de assinatura enviado',
+      signature_confirmed_by_client_at: null,
+      signed_at: null,
+      is_archived: false,
+    };
+
+    const { error } = await supabase
+      .from('leads')
+      .update(patch)
+      .eq('id', lead.id);
+
+    if (error) {
+      setFeedback(`Erro ao marcar assinatura como pendente: ${error.message}`);
+      setUpdatingId(null);
+      return;
+    }
+
+    setLocalLeads((current) =>
+      current.map((item) =>
+        item.id === lead.id
+          ? ({
+              ...item,
+              ...patch,
+            } as LeadRecord)
+          : item,
+      ),
+    );
+
+    if (selectedLead?.id === lead.id) {
+      setSelectedLead({
+        ...selectedLead,
+        ...patch,
+      } as LeadRecord);
+    }
+
+    setFeedback('Lead marcado como pendente de assinatura e movido para Em digitação.');
+    setUpdatingId(null);
+  }
+
   function openClosureModal(lead: LeadRecord) {
     setClosingLead(lead);
     setClosureReason('');
@@ -1307,6 +1376,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     const canPreSimulate = canPreSimulateLead(lead);
     const canOpenOffers = canManageOffers(lead);
     const canOpenDigitation = canManageDigitation(lead);
+    const signed = isLeadSigned(lead);
 
     return (
       <>
@@ -1352,6 +1422,17 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
               Enviar link de assinatura
             </button>
           </>
+        ) : null}
+
+        {signed ? (
+          <button
+            type="button"
+            disabled={updatingId === lead.id}
+            onClick={() => void markSignatureAsPending(lead)}
+            style={getPendingSignatureButtonStyle(updatingId === lead.id)}
+          >
+            Marcar como pendente assinatura
+          </button>
         ) : null}
       </>
     );
@@ -1522,6 +1603,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                     const canPreSimulate = canPreSimulateLead(lead);
                     const selectedOfferSummary = getSelectedOfferSummary(lead);
                     const signatureLink = getSignatureLink(lead);
+                    const signed = isLeadSigned(lead);
 
                     return (
                       <article
@@ -1605,7 +1687,25 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                             </span>
                           ) : null}
 
-                          {signatureLink ? (
+                          {signed ? (
+                            <span
+                              style={{
+                                display: 'block',
+                                marginTop: 8,
+                                borderRadius: 12,
+                                padding: 9,
+                                background: '#dcfce7',
+                                border: '1px solid #86efac',
+                                color: '#166534',
+                                fontSize: 11,
+                                fontWeight: 900,
+                                lineHeight: 1.45,
+                                textAlign: 'center',
+                              }}
+                            >
+                              ASSINADO
+                            </span>
+                          ) : signatureLink ? (
                             <span
                               style={{
                                 display: 'block',
@@ -1794,7 +1894,12 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                 </div>
               ) : null}
 
-              {getSignatureLink(selectedLead) ? (
+              {isLeadSigned(selectedLead) ? (
+                <div className="metric-row">
+                  <span>Assinatura</span>
+                  <strong style={{ color: '#166534' }}>ASSINADO</strong>
+                </div>
+              ) : getSignatureLink(selectedLead) ? (
                 <div className="metric-row">
                   <span>Assinatura</span>
                   <strong>Link enviado</strong>
