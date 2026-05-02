@@ -23,6 +23,9 @@ type LeadRecordWithOperationalFields = LeadRecord & {
   signature_confirmation_requested_at?: string | null;
   signature_confirmed_by_client_at?: string | null;
   signed_at?: string | null;
+  contract_number?: string | null;
+  payment_date?: string | null;
+  paid_at?: string | null;
 
   clt_ready_for_presimulation?: boolean | null;
   clt_triage_completed_at?: string | null;
@@ -75,6 +78,11 @@ type ContractDataForm = {
   bank_agency: string;
   pix_key: string;
   bank_name: string;
+};
+
+type PaymentDataForm = {
+  contract_number: string;
+  payment_date: string;
 };
 
 interface FunnelViewProps {
@@ -181,6 +189,24 @@ function createContractDataFormFromLead(lead: LeadRecord | null): ContractDataFo
   };
 }
 
+function createEmptyPaymentDataForm(): PaymentDataForm {
+  return {
+    contract_number: '',
+    payment_date: '',
+  };
+}
+
+function createPaymentDataFormFromLead(lead: LeadRecord | null): PaymentDataForm {
+  if (!lead) return createEmptyPaymentDataForm();
+
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+
+  return {
+    contract_number: extendedLead.contract_number || '',
+    payment_date: extendedLead.payment_date || '',
+  };
+}
+
 function formatMoney(value: number) {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -207,7 +233,8 @@ function normalizeStage(lead: LeadRecord) {
 }
 
 function statusFromStage(stage: string) {
-  if (stage === 'Assinado' || stage === 'Pago' || stage === 'Pós-venda') return 'Fechado';
+  if (stage === 'Pago') return 'PAGO';
+  if (stage === 'Assinado' || stage === 'Pós-venda') return 'Fechado';
   if (stage === 'Perdido') return 'Perdido';
   return stage;
 }
@@ -294,6 +321,31 @@ function isLeadSigned(lead: LeadRecord) {
     Boolean(extendedLead.signed_at) ||
     Boolean(extendedLead.signature_confirmed_by_client_at)
   );
+}
+
+function isLeadPaid(lead: LeadRecord) {
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+  return normalizeStage(lead) === 'Pago' || lead.status === 'PAGO' || Boolean(extendedLead.paid_at);
+}
+
+function getContractNumber(lead: LeadRecord) {
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+  return extendedLead.contract_number || null;
+}
+
+function getPaymentDate(lead: LeadRecord) {
+  const extendedLead = lead as LeadRecordWithOperationalFields;
+  return extendedLead.payment_date || null;
+}
+
+function formatDateBR(value?: string | null) {
+  if (!value) return '-';
+
+  const [year, month, day] = String(value).slice(0, 10).split('-');
+
+  if (!year || !month || !day) return value;
+
+  return `${day}/${month}/${year}`;
 }
 
 function getActiveOfferRound(lead: LeadRecord | null) {
@@ -400,6 +452,21 @@ function getPendingSignatureButtonStyle(disabled: boolean): React.CSSProperties 
     padding: '9px 10px',
     background: disabled ? '#f1f5f9' : '#fff7ed',
     color: disabled ? '#94a3b8' : '#c2410c',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 12,
+    fontWeight: 900,
+    marginTop: 8,
+  };
+}
+
+function getPaymentButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    width: '100%',
+    border: '1px solid #86efac',
+    borderRadius: 10,
+    padding: '9px 10px',
+    background: disabled ? '#f1f5f9' : '#dcfce7',
+    color: disabled ? '#94a3b8' : '#166534',
     cursor: disabled ? 'not-allowed' : 'pointer',
     fontSize: 12,
     fontWeight: 900,
@@ -531,6 +598,10 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
   const [signatureLink, setSignatureLink] = useState('');
   const [signatureSending, setSignatureSending] = useState(false);
 
+  const [paymentLead, setPaymentLead] = useState<LeadRecord | null>(null);
+  const [paymentForm, setPaymentForm] = useState<PaymentDataForm>(createEmptyPaymentDataForm);
+  const [paymentSaving, setPaymentSaving] = useState(false);
+
   useEffect(() => {
     setLocalLeads(leads);
   }, [leads]);
@@ -550,8 +621,9 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
   }, [currentMonthLeads]);
 
   const total = currentMonthLeads.length;
+  const statusOptions = Array.from(new Set([...STATUS_OPTIONS, 'PAGO']));
 
-  const byStatus = STATUS_OPTIONS.map((status) => ({
+  const byStatus = statusOptions.map((status) => ({
     label: status,
     count: currentMonthLeads.filter((lead) => lead.status === status).length,
   }));
@@ -1137,6 +1209,80 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     setUpdatingId(null);
   }
 
+  function openPaymentModal(lead: LeadRecord) {
+    setPaymentLead(lead);
+    setPaymentForm(createPaymentDataFormFromLead(lead));
+    setPaymentSaving(false);
+    setFeedback(null);
+  }
+
+  function closePaymentModal() {
+    setPaymentLead(null);
+    setPaymentForm(createEmptyPaymentDataForm());
+    setPaymentSaving(false);
+  }
+
+  function updatePaymentField(field: keyof PaymentDataForm, value: string) {
+    setPaymentForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  async function savePaymentData() {
+    if (!paymentLead) return;
+
+    setPaymentSaving(true);
+    setFeedback(null);
+
+    const patch = {
+      contract_number: paymentForm.contract_number.trim() || null,
+      payment_date: paymentForm.payment_date || null,
+      paid_at: new Date().toISOString(),
+      etapa: 'Pago',
+      status: 'PAGO',
+      is_archived: false,
+    };
+
+    const { error } = await supabase
+      .from('leads')
+      .update(patch)
+      .eq('id', paymentLead.id);
+
+    if (error) {
+      setFeedback(`Erro ao salvar dados do pagamento: ${error.message}`);
+      setPaymentSaving(false);
+      return;
+    }
+
+    setLocalLeads((current) =>
+      current.map((lead) =>
+        lead.id === paymentLead.id
+          ? ({
+              ...lead,
+              ...patch,
+            } as LeadRecord)
+          : lead,
+      ),
+    );
+
+    if (selectedLead?.id === paymentLead.id) {
+      setSelectedLead({
+        ...selectedLead,
+        ...patch,
+      } as LeadRecord);
+    }
+
+    setPaymentLead({
+      ...paymentLead,
+      ...patch,
+    } as LeadRecord);
+
+    setFeedback('Dados do pagamento salvos com sucesso.');
+    setPaymentSaving(false);
+    closePaymentModal();
+  }
+
   function openClosureModal(lead: LeadRecord) {
     setClosingLead(lead);
     setClosureReason('');
@@ -1377,6 +1523,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
     const canOpenOffers = canManageOffers(lead);
     const canOpenDigitation = canManageDigitation(lead);
     const signed = isLeadSigned(lead);
+    const canOpenPayment = normalizeStage(lead) === 'Pago';
 
     return (
       <>
@@ -1432,6 +1579,17 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
             style={getPendingSignatureButtonStyle(updatingId === lead.id)}
           >
             Marcar como pendente assinatura
+          </button>
+        ) : null}
+
+        {canOpenPayment ? (
+          <button
+            type="button"
+            disabled={updatingId === lead.id}
+            onClick={() => openPaymentModal(lead)}
+            style={getPaymentButtonStyle(updatingId === lead.id)}
+          >
+            Dados do pagamento
           </button>
         ) : null}
       </>
@@ -1604,6 +1762,9 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                     const selectedOfferSummary = getSelectedOfferSummary(lead);
                     const signatureLink = getSignatureLink(lead);
                     const signed = isLeadSigned(lead);
+                    const paid = isLeadPaid(lead);
+                    const contractNumber = getContractNumber(lead);
+                    const paymentDate = getPaymentDate(lead);
 
                     return (
                       <article
@@ -1687,7 +1848,27 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                             </span>
                           ) : null}
 
-                          {signed ? (
+                          {paid ? (
+                            <span
+                              style={{
+                                display: 'block',
+                                marginTop: 8,
+                                borderRadius: 12,
+                                padding: 9,
+                                background: '#dcfce7',
+                                border: '1px solid #22c55e',
+                                color: '#166534',
+                                fontSize: 11,
+                                fontWeight: 900,
+                                lineHeight: 1.45,
+                                textAlign: 'center',
+                              }}
+                            >
+                              PAGO
+                              {contractNumber ? <><br />Contrato: {contractNumber}</> : null}
+                              {paymentDate ? <><br />Pago em: {formatDateBR(paymentDate)}</> : null}
+                            </span>
+                          ) : signed ? (
                             <span
                               style={{
                                 display: 'block',
@@ -1894,7 +2075,24 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                 </div>
               ) : null}
 
-              {isLeadSigned(selectedLead) ? (
+              {isLeadPaid(selectedLead) ? (
+                <>
+                  <div className="metric-row">
+                    <span>Pagamento</span>
+                    <strong style={{ color: '#166534' }}>PAGO</strong>
+                  </div>
+
+                  <div className="metric-row">
+                    <span>Número do contrato</span>
+                    <strong>{getContractNumber(selectedLead) || '-'}</strong>
+                  </div>
+
+                  <div className="metric-row">
+                    <span>Data de pagamento</span>
+                    <strong>{formatDateBR(getPaymentDate(selectedLead))}</strong>
+                  </div>
+                </>
+              ) : isLeadSigned(selectedLead) ? (
                 <div className="metric-row">
                   <span>Assinatura</span>
                   <strong style={{ color: '#166534' }}>ASSINADO</strong>
@@ -2649,6 +2847,132 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
               >
                 {signatureSending ? 'Enviando...' : 'Enviar link'}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {paymentLead ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.62)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 108,
+            padding: 20,
+          }}
+          onClick={closePaymentModal}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: '100%',
+              maxWidth: 620,
+              background: '#fff',
+              borderRadius: 22,
+              padding: 22,
+              boxShadow: '0 24px 80px rgba(15, 23, 42, 0.28)',
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header" style={{ marginBottom: 16 }}>
+              <div>
+                <span className="eyebrow">Dados do pagamento</span>
+                <h2>{paymentLead.nome || 'Lead sem nome'}</h2>
+                <p className="panel-subtitle">
+                  Registre o número do contrato e a data em que o pagamento foi realizado ao cliente.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closePaymentModal}
+                style={{
+                  border: 0,
+                  borderRadius: 999,
+                  background: '#0f172a',
+                  color: '#fff',
+                  padding: '9px 14px',
+                  cursor: 'pointer',
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: 14 }}>
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Número do contrato</span>
+                <input
+                  value={paymentForm.contract_number}
+                  onChange={(event) => updatePaymentField('contract_number', event.target.value)}
+                  placeholder="Ex.: 123456789"
+                />
+              </label>
+
+              <label>
+                <span style={{ color: '#0f172a', fontWeight: 700 }}>Data de pagamento</span>
+                <input
+                  type="date"
+                  value={paymentForm.payment_date}
+                  onChange={(event) => updatePaymentField('payment_date', event.target.value)}
+                />
+              </label>
+
+              <div
+                style={{
+                  borderRadius: 16,
+                  padding: 14,
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  color: '#166534',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                }}
+              >
+                Ao salvar, o lead permanecerá na etapa Pago com status PAGO e os dados ficarão salvos no histórico/base.
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={closePaymentModal}
+                  disabled={paymentSaving}
+                  style={{
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 12,
+                    padding: '12px 14px',
+                    background: '#fff',
+                    color: '#0f172a',
+                    cursor: paymentSaving ? 'not-allowed' : 'pointer',
+                    fontWeight: 900,
+                  }}
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void savePaymentData()}
+                  disabled={paymentSaving}
+                  style={{
+                    border: 0,
+                    borderRadius: 12,
+                    padding: '12px 14px',
+                    background: 'linear-gradient(180deg, #86efac, #22c55e)',
+                    color: '#052e16',
+                    cursor: paymentSaving ? 'not-allowed' : 'pointer',
+                    fontWeight: 900,
+                  }}
+                >
+                  {paymentSaving ? 'Salvando...' : 'Salvar pagamento'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
