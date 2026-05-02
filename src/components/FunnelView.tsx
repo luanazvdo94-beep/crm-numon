@@ -585,6 +585,36 @@ function buildContractDataText(form: ContractDataForm) {
   ].join('\n');
 }
 
+
+function getStageVisual(stage: string) {
+  const visuals: Record<string, { bg: string; border: string; color: string; dot: string }> = {
+    'Novo lead': { bg: '#eff6ff', border: '#bfdbfe', color: '#1d4ed8', dot: '#2563eb' },
+    'Em atendimento': { bg: '#ecfeff', border: '#a5f3fc', color: '#0e7490', dot: '#06b6d4' },
+    'Vai analisar': { bg: '#fefce8', border: '#fde68a', color: '#92400e', dot: '#f59e0b' },
+    'Em proposta': { bg: '#f5f3ff', border: '#ddd6fe', color: '#6d28d9', dot: '#7c3aed' },
+    'Em digitação': { bg: '#fff7ed', border: '#fed7aa', color: '#c2410c', dot: '#f97316' },
+    Assinado: { bg: '#f0fdf4', border: '#bbf7d0', color: '#166534', dot: '#22c55e' },
+    Pago: { bg: '#dcfce7', border: '#86efac', color: '#14532d', dot: '#16a34a' },
+    'Pós-venda': { bg: '#f8fafc', border: '#cbd5e1', color: '#334155', dot: '#64748b' },
+  };
+
+  return visuals[stage] || { bg: '#f8fafc', border: '#e2e8f0', color: '#334155', dot: '#94a3b8' };
+}
+
+function getStatusVisual(status: string) {
+  const visuals: Record<string, { bg: string; border: string; color: string; dot: string }> = {
+    Novo: { bg: '#eff6ff', border: '#bfdbfe', color: '#1d4ed8', dot: '#2563eb' },
+    'Contato iniciado': { bg: '#ecfeff', border: '#a5f3fc', color: '#0e7490', dot: '#06b6d4' },
+    'Proposta enviada': { bg: '#f5f3ff', border: '#ddd6fe', color: '#6d28d9', dot: '#7c3aed' },
+    'Aguardando retorno': { bg: '#fff7ed', border: '#fed7aa', color: '#c2410c', dot: '#f97316' },
+    Fechado: { bg: '#f0fdf4', border: '#bbf7d0', color: '#166534', dot: '#22c55e' },
+    PAGO: { bg: '#dcfce7', border: '#86efac', color: '#14532d', dot: '#16a34a' },
+    Perdido: { bg: '#fff1f2', border: '#fecdd3', color: '#be123c', dot: '#e11d48' },
+  };
+
+  return visuals[status] || { bg: '#f8fafc', border: '#e2e8f0', color: '#334155', dot: '#94a3b8' };
+}
+
 export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
   const [localLeads, setLocalLeads] = useState<LeadRecord[]>(leads);
   const [selectedLead, setSelectedLead] = useState<LeadRecord | null>(null);
@@ -1627,7 +1657,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(280px, 1.5fr) minmax(320px, 1fr)',
+          gridTemplateColumns: 'minmax(320px, 1.45fr) minmax(320px, 1fr)',
           gap: 14,
           marginTop: 18,
           marginBottom: 18,
@@ -1636,100 +1666,204 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
         <article
           className="stat-card"
           style={{
-            minHeight: 142,
+            minHeight: 148,
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
-            background: 'linear-gradient(135deg, #0f172a, #164e63)',
+            background: 'linear-gradient(135deg, #020617, #0f172a 48%, #164e63)',
             color: '#fff',
             border: '1px solid rgba(255,255,255,0.12)',
+            boxShadow: '0 24px 70px rgba(15, 23, 42, 0.22)',
           }}
         >
           <div>
-            <span style={{ color: '#bae6fd', fontWeight: 800 }}>Valor pago no mês</span>
-            <strong style={{ display: 'block', marginTop: 12, fontSize: 34, color: '#fff' }}>
+            <span style={{ color: '#bae6fd', fontWeight: 900, letterSpacing: 0.2 }}>Valor pago no mês</span>
+            <strong style={{ display: 'block', marginTop: 12, fontSize: 38, color: '#fff', letterSpacing: -1 }}>
               {formatMoney(paidValue)}
             </strong>
           </div>
 
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: '#e0f2fe', fontSize: 13 }}>
-            <span>{paidCount} contrato{paidCount === 1 ? '' : 's'} pago{paidCount === 1 ? '' : 's'}</span>
-            <span>•</span>
-            <span>{getCurrentMonthLabel()}</span>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', color: '#e0f2fe', fontSize: 13 }}>
+            <span
+              style={{
+                borderRadius: 999,
+                padding: '6px 10px',
+                background: 'rgba(255,255,255,0.1)',
+                border: '1px solid rgba(255,255,255,0.14)',
+                fontWeight: 800,
+              }}
+            >
+              {paidCount} contrato{paidCount === 1 ? '' : 's'} pago{paidCount === 1 ? '' : 's'}
+            </span>
+            <span
+              style={{
+                borderRadius: 999,
+                padding: '6px 10px',
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                fontWeight: 800,
+              }}
+            >
+              {getCurrentMonthLabel()}
+            </span>
           </div>
         </article>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <article className="stat-card">
+          <article className="stat-card" style={{ borderRadius: 18 }}>
             <span>Leads ativos</span>
             <strong>{activeCurrentMonthLeads.length}</strong>
           </article>
 
-          <article className="stat-card">
+          <article className="stat-card" style={{ borderRadius: 18 }}>
             <span>Pagos</span>
             <strong>{paidCount}</strong>
           </article>
 
-          <article className="stat-card">
+          <article className="stat-card" style={{ borderRadius: 18 }}>
             <span>Assinados/fechados</span>
             <strong>{signedCount}</strong>
           </article>
 
-          <article className="stat-card">
+          <article className="stat-card" style={{ borderRadius: 18 }}>
             <span>Conversão em pago</span>
             <strong>{conversionRate}%</strong>
           </article>
         </div>
       </div>
 
-      <div className="funnel-columns" style={{ marginTop: 18 }}>
-        <div className="funnel-block">
-          <h3>Métricas por etapa</h3>
-
-          {stageMetrics.map((item) => (
-            <div key={item.label} className="metric-row">
-              <span>{item.label}</span>
-              <strong>
-                {item.count} lead{item.count === 1 ? '' : 's'} · {item.conversion}%
-              </strong>
+      <div
+        style={{
+          display: 'grid',
+          gap: 14,
+          marginBottom: 18,
+        }}
+      >
+        <div
+          className="glass-card"
+          style={{
+            borderRadius: 22,
+            padding: 16,
+            border: '1px solid #e2e8f0',
+            background: '#ffffff',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, color: '#0f172a', fontSize: 15 }}>Resumo por etapa</h3>
+              <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: 12 }}>
+                Visão compacta do volume por coluna do funil.
+              </p>
             </div>
-          ))}
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {stageMetrics.map((item) => {
+              const visual = getStageVisual(item.label);
+
+              return (
+                <div
+                  key={item.label}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    borderRadius: 999,
+                    padding: '8px 11px',
+                    background: visual.bg,
+                    border: `1px solid ${visual.border}`,
+                    color: visual.color,
+                    fontSize: 12,
+                    fontWeight: 900,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: 999, background: visual.dot }} />
+                  <span>{item.label}</span>
+                  <strong style={{ color: visual.color }}>{item.count}</strong>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        <div className="funnel-block">
-          <h3>Por status</h3>
-
-          {byStatus.map((item) => (
-            <div key={item.label} className="metric-row">
-              <span>{item.label}</span>
-              <strong>{item.count}</strong>
+        <div
+          className="glass-card"
+          style={{
+            borderRadius: 22,
+            padding: 16,
+            border: '1px solid #e2e8f0',
+            background: '#ffffff',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, color: '#0f172a', fontSize: 15 }}>Resumo por status</h3>
+              <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: 12 }}>
+                Indicadores operacionais em formato compacto.
+              </p>
             </div>
-          ))}
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {byStatus.map((item) => {
+              const visual = getStatusVisual(item.label);
+
+              return (
+                <div
+                  key={item.label}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    borderRadius: 999,
+                    padding: '8px 11px',
+                    background: visual.bg,
+                    border: `1px solid ${visual.border}`,
+                    color: visual.color,
+                    fontSize: 12,
+                    fontWeight: 900,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: 999, background: visual.dot }} />
+                  <span>{item.label}</span>
+                  <strong style={{ color: visual.color }}>{item.count}</strong>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: `repeat(${stages.length}, minmax(220px, 1fr))`,
+          gridTemplateColumns: `repeat(${stages.length}, minmax(250px, 1fr))`,
           gap: 14,
           overflowX: 'auto',
-          paddingBottom: 8,
+          paddingBottom: 10,
           marginTop: 22,
+          alignItems: 'start',
         }}
       >
         {stages.map((stage) => {
           const stageLeads = activeCurrentMonthLeads.filter((lead) => normalizeStage(lead) === stage);
+          const visual = getStageVisual(stage);
 
           return (
             <div
               key={stage}
               style={{
-                minWidth: 220,
+                minWidth: 250,
                 background: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                borderRadius: 18,
+                border: `1px solid ${visual.border}`,
+                borderRadius: 20,
                 padding: 12,
+                height: 'min(68vh, 720px)',
+                display: 'flex',
+                flexDirection: 'column',
+                boxShadow: '0 10px 28px rgba(15, 23, 42, 0.05)',
               }}
             >
               <div
@@ -1739,9 +1873,16 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                   justifyContent: 'space-between',
                   gap: 10,
                   marginBottom: 12,
+                  padding: '4px 2px 8px',
+                  borderBottom: '1px solid #e2e8f0',
                 }}
               >
-                <h3 style={{ margin: 0, fontSize: 15, color: '#0f172a' }}>{stage}</h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 999, background: visual.dot, flex: '0 0 auto' }} />
+                  <h3 style={{ margin: 0, fontSize: 14, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {stage}
+                  </h3>
+                </div>
                 <strong
                   style={{
                     minWidth: 30,
@@ -1750,16 +1891,27 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: '#0f172a',
+                    background: visual.dot,
                     color: '#fff',
                     fontSize: 13,
+                    boxShadow: '0 8px 18px rgba(15, 23, 42, 0.16)',
                   }}
                 >
                   {stageLeads.length}
                 </strong>
               </div>
 
-              <div style={{ display: 'grid', gap: 10 }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gap: 10,
+                  overflowY: 'auto',
+                  paddingRight: 4,
+                  paddingBottom: 2,
+                  flex: 1,
+                  alignContent: 'start',
+                }}
+              >
                 {stageLeads.length === 0 ? (
                   <div
                     style={{
@@ -1769,6 +1921,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
                       color: '#94a3b8',
                       fontSize: 13,
                       textAlign: 'center',
+                      background: '#fff',
                     }}
                   >
                     Sem leads nesta etapa
@@ -1995,6 +2148,7 @@ export function FunnelView({ leads, onPreSimulateLead }: FunnelViewProps) {
           );
         })}
       </div>
+
 
       {selectedLead ? (
         <div
